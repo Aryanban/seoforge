@@ -31,7 +31,15 @@ export async function submitToIndexNow(options: IndexNowOptions): Promise<IndexN
   };
 
   if (keyLocation) {
-    payload.keyLocation = keyLocation;
+    try {
+      const locHost = new URL(keyLocation).hostname.replace(/^www\./, '');
+      const currentHost = host.replace(/^www\./, '');
+      if (locHost === currentHost) {
+        payload.keyLocation = keyLocation;
+      }
+    } catch {
+      // Ignore invalid keyLocation
+    }
   }
 
   try {
