@@ -11,6 +11,7 @@
       "url": "https://www.webforge.me/",
       "sitemap": "https://www.webforge.me/sitemap.xml",
       "robots": "https://www.webforge.me/robots.txt",
+      "canonicalPolicy": "spa",
       "priority": "high",
       "expectedEntities": ["Person", "WebSite", "SoftwareApplication"],
       "paths": [
@@ -26,6 +27,9 @@
       "url": "https://dholeramap.com/",
       "sitemap": "https://dholeramap.com/sitemap.xml",
       "robots": "https://dholeramap.com/robots.txt",
+      "llmsTxt": "https://dholeramap.com/llms.txt",
+      "llmsFullTxt": "https://dholeramap.com/llms-full.txt",
+      "sampleSitemap": 5,
       "priority": "high",
       "expectedEntities": ["WebSite", "FAQPage"],
       "paths": [
@@ -37,6 +41,7 @@
       "url": "https://plotbook.webforge.me/",
       "sitemap": "https://plotbook.webforge.me/sitemap.xml",
       "robots": "https://plotbook.webforge.me/robots.txt",
+      "sampleSitemap": 3,
       "priority": "high",
       "expectedEntities": ["WebSite", "SoftwareApplication"],
       "paths": [

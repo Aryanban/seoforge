@@ -35,6 +35,7 @@
     "url": "https://github.com/Aryanban/seoforge.git"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "cheerio": "^1.0.0",
     "colorette": "^2.0.20",
     "commander": "^13.1.0",

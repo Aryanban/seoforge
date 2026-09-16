@@ -3,6 +3,10 @@ export interface DomainConfig {
   url: string;
   sitemap?: string;
   robots?: string;
+  llmsTxt?: string;
+  llmsFullTxt?: string;
+  sampleSitemap?: number;
+  canonicalPolicy?: "strict" | "spa";
   priority?: "high" | "medium" | "low";
   expectedEntities?: string[];
   paths?: string[];
@@ -48,6 +52,7 @@ export interface PageAuditResult {
   responseTimeMs: number;
   canonical?: string;
   canonicalMatches: boolean;
+  isSpaCanonicalValid?: boolean;
   title?: string;
   description?: string;
   openGraph: {
@@ -65,6 +70,9 @@ export interface DomainAuditResult {
   robotsAccessible: boolean;
   sitemapAccessible: boolean;
   sitemapUrlCount: number;
+  llmsTxtAccessible?: boolean;
+  llmsFullTxtAccessible?: boolean;
+  sampledUrlsCount?: number;
   pages: PageAuditResult[];
   averageAeoScore: number;
   passed: boolean;
@@ -79,3 +87,4 @@ export interface OverallAuditReport {
   criticalIssues: string[];
   results: DomainAuditResult[];
 }
+
