@@ -1,0 +1,53 @@
+{
+  "$schema": "./schema.json",
+  "project": "Aryan Bansal Digital Ecosystem",
+  "indexnow": {
+    "key": "4f9d2a1b7e8c3d5f6a0b9e8d7c6b5a4f",
+    "keyLocation": "https://www.webforge.me/4f9d2a1b7e8c3d5f6a0b9e8d7c6b5a4f.txt"
+  },
+  "domains": [
+    {
+      "name": "Webforge Portfolio",
+      "url": "https://www.webforge.me/",
+      "sitemap": "https://www.webforge.me/sitemap.xml",
+      "robots": "https://www.webforge.me/robots.txt",
+      "priority": "high",
+      "expectedEntities": ["Person", "WebSite", "SoftwareApplication"],
+      "paths": [
+        "/",
+        "/projects",
+        "/skills",
+        "/terminal",
+        "/sitemap"
+      ]
+    },
+    {
+      "name": "DholeraMap GIS",
+      "url": "https://dholeramap.com/",
+      "sitemap": "https://dholeramap.com/sitemap.xml",
+      "robots": "https://dholeramap.com/robots.txt",
+      "priority": "high",
+      "expectedEntities": ["WebSite", "FAQPage"],
+      "paths": [
+        "/"
+      ]
+    },
+    {
+      "name": "PlotBook Real Estate Intelligence",
+      "url": "https://plotbook.webforge.me/",
+      "sitemap": "https://plotbook.webforge.me/sitemap.xml",
+      "robots": "https://plotbook.webforge.me/robots.txt",
+      "priority": "high",
+      "expectedEntities": ["WebSite", "SoftwareApplication"],
+      "paths": [
+        "/"
+      ]
+    }
+  ],
+  "thresholds": {
+    "maxResponseTimeMs": 1200,
+    "minAeoScore": 70,
+    "requireCanonical": true,
+    "requireSchema": true
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "name": "seoforge",
+  "version": "1.0.0",
+  "description": "Autonomous SEO and Answer Engine Optimization (AEO) CLI engine & crawler for multi-domain verification, Schema.org validation, and IndexNow dispatch.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "seoforge": "dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "audit": "tsx src/cli.ts audit",
+    "indexnow": "tsx src/cli.ts indexnow",
+    "report": "tsx src/cli.ts report",
+    "daily": "tsx src/cli.ts daily",
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "keywords": [
+    "seo",
+    "aeo",
+    "answer-engine-optimization",
+    "indexnow",
+    "schema-org",
+    "ai-search",
+    "perplexity",
+    "google-search-essentials",
+    "bing-webmaster",
+    "autonomous-agent"
+  ],
+  "author": "Aryan Bansal <https://www.webforge.me/>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Aryanban/seoforge.git"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "colorette": "^2.0.20",
+    "commander": "^13.1.0",
+    "fast-xml-parser": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2"
+  }
+}
