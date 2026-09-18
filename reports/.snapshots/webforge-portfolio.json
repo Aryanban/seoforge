@@ -1,0 +1,52 @@
+{
+  "domainUrl": "https://www.webforge.me/",
+  "crawlDate": "2026-09-18T12:20:56.706Z",
+  "pages": {
+    "https://www.webforge.me/": {
+      "url": "https://www.webforge.me/",
+      "title": "Aryan Bansal | Systems Engineer & Designer Portfolio",
+      "description": "Personal portfolio of Aryan Bansal showcasing systems engineering projects, hardware simulators, UI/UX architectures, and academic milestones from IIIT Delhi.",
+      "canonical": "https://www.webforge.me/",
+      "h1Text": "Aryan Bansal • Systems Engineer & Designer Portfolio",
+      "wordCount": 336,
+      "status": 200
+    },
+    "https://www.webforge.me/projects": {
+      "url": "https://www.webforge.me/projects",
+      "title": "Projects & Systems Architecture | Aryan Bansal",
+      "description": "Explore production SaaS platforms, autonomous AI agents, WebGL vector GIS engines, and low-level computer architecture emulators by Aryan Bansal (IIIT Delhi).",
+      "canonical": "https://www.webforge.me/projects",
+      "h1Text": "Production Systems, Open-Source Tools & Hardware Emulators",
+      "wordCount": 381,
+      "status": 200
+    },
+    "https://www.webforge.me/skills": {
+      "url": "https://www.webforge.me/skills",
+      "title": "Technical Skills & Academic Milestones | Aryan Bansal",
+      "description": "Core competencies in systems architecture, full-stack engineering, database internals, and academic coursework at IIIT Delhi.",
+      "canonical": "https://www.webforge.me/skills",
+      "h1Text": "Technical Expertise, Systems Architecture & Academic Progression",
+      "wordCount": 380,
+      "status": 200
+    },
+    "https://www.webforge.me/terminal": {
+      "url": "https://www.webforge.me/terminal",
+      "title": "Interactive Terminal Shell | Aryan Bansal",
+      "description": "Interactive developer terminal shell with live command execution, JSON composer, and direct communication channels with Aryan Bansal.",
+      "canonical": "https://www.webforge.me/terminal",
+      "h1Text": "Interactive Developer Terminal Shell & Direct Communication Channels",
+      "wordCount": 346,
+      "status": 200
+    },
+    "https://www.webforge.me/sitemap": {
+      "url": "https://www.webforge.me/sitemap",
+      "title": "Architecture Registry & Sitemap | Aryan Bansal",
+      "description": "Comprehensive visual and protocol sitemap index of all systems, SaaS platforms, and repositories by Aryan Bansal.",
+      "canonical": "https://www.webforge.me/sitemap",
+      "h1Text": "Architecture Registry & Visual Protocol Sitemap Index",
+      "wordCount": 375,
+      "status": 200
+    }
+  },
+  "issueCounts": {}
+}

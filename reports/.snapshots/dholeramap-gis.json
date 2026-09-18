@@ -1,0 +1,47 @@
+{
+  "domainUrl": "https://dholeramap.com/",
+  "crawlDate": "2026-09-18T12:20:57.289Z",
+  "pages": {
+    "https://dholeramap.com/": {
+      "url": "https://dholeramap.com/",
+      "title": "PlotBook | Official Dholera SIR Cadastral GIS Atlas",
+      "description": "Explore 20,912 statutory survey numbers, sanctioned preliminary town planning plots, DGDCR building regulations, and all-weather road access nodes across Dholera Special Investment Region (SIR), Gujarat.",
+      "canonical": "https://dholeramap.com",
+      "h1Text": "PlotBook — Official Dholera SIR Cadastral GIS Atlas",
+      "wordCount": 220,
+      "status": 200
+    },
+    "https://dholeramap.com/survey/khun/450": {
+      "url": "https://dholeramap.com/survey/khun/450",
+      "title": "Survey No. 450, Village Khun | Dholera SIR Cadastral Land Record",
+      "description": "Statutory cadastral record, DGDCR 2024 building envelope (2.5 Max FAR), sanctioned 55m TP road frontage, and Form 4/5 reconstitution for Survey 450 in Village Khun, Dholera SIR.",
+      "canonical": "https://dholeramap.com/survey/khun/450",
+      "h1Text": "Revenue Survey No. 450",
+      "wordCount": 199,
+      "status": 200
+    },
+    "https://dholeramap.com/village/kadipur": {
+      "url": "https://dholeramap.com/village/kadipur",
+      "title": "Village Kadipur Cadastral Map & Revenue Survey Directory | Dholera SIR",
+      "description": "Statutory revenue survey boundaries, DGDCR 2024 zoning limits, sanctioned TP road frontage (18m–70m), and Town Planning schemes for Village Kadipur, Dholera SIR, Gujarat.",
+      "canonical": "https://dholeramap.com/village/kadipur",
+      "h1Text": "Village Kadipur Cadastral Map & Planning Directory",
+      "wordCount": 321,
+      "status": 200
+    },
+    "https://dholeramap.com/survey/kadipur/120": {
+      "url": "https://dholeramap.com/survey/kadipur/120",
+      "title": "Survey No. 120, Village Kadipur | Dholera SIR Cadastral Land Record",
+      "description": "Statutory cadastral record, DGDCR 2024 building envelope (2.5 Max FAR), sanctioned 55m TP road frontage, and Form 4/5 reconstitution for Survey 120 in Village Kadipur, Dholera SIR.",
+      "canonical": "https://dholeramap.com/survey/kadipur/120",
+      "h1Text": "Revenue Survey No. 120",
+      "wordCount": 199,
+      "status": 200
+    }
+  },
+  "issueCounts": {
+    "Low word count": 3,
+    "Orphan page (has no incoming internal links)": 1,
+    "Page has only one dofollow incoming internal link": 2
+  }
+}

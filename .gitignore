@@ -3,5 +3,6 @@ dist/
 .DS_Store
 *.log
 reports/daily-*.md
+reports/.snapshots/
 !reports/.gitkeep
 .env

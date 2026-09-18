@@ -34,23 +34,52 @@ async function runAudit(
     const res = await crawlDomain(domain, { sampleSitemap: sample });
     results.push(res);
     if (!res.passed) {
-      criticalIssues.push(`Domain '${domain.name}' has failing health checks.`);
+      criticalIssues.push(
+        `Domain '${domain.name}' has issues (${res.totalErrors} errors, ${res.totalWarnings} warnings).`
+      );
     }
   }
 
   const totalUrls = results.reduce((acc, r) => acc + r.pages.length, 0);
+  const totalErrors = results.reduce((acc, r) => acc + r.totalErrors, 0);
+  const totalWarnings = results.reduce((acc, r) => acc + r.totalWarnings, 0);
+  const totalNotices = results.reduce((acc, r) => acc + r.totalNotices, 0);
+  const totalIssues = totalErrors + totalWarnings + totalNotices;
+
   const avgAeo =
     results.length > 0
       ? Math.round(results.reduce((acc, r) => acc + r.averageAeoScore, 0) / results.length)
       : 0;
+
+  // Aggregate issues across all domains
+  const allIssuesMap = new Map<string, any>();
+  for (const d of results) {
+    for (const issue of d.issuesSummary) {
+      if (!allIssuesMap.has(issue.name)) {
+        allIssuesMap.set(issue.name, { ...issue });
+      } else {
+        const existing = allIssuesMap.get(issue.name)!;
+        existing.affectedPages += issue.affectedPages;
+        existing.change += issue.change;
+        existing.affectedUrls = Array.from(
+          new Set([...existing.affectedUrls, ...issue.affectedUrls])
+        );
+      }
+    }
+  }
 
   return {
     timestamp: new Date().toISOString(),
     project: config.project,
     domainsAudited: results.length,
     totalUrlsChecked: totalUrls,
+    totalErrors,
+    totalWarnings,
+    totalNotices,
+    totalIssues,
     averageAeoScore: avgAeo,
     criticalIssues,
+    issuesSummary: Array.from(allIssuesMap.values()),
     results,
   };
 }

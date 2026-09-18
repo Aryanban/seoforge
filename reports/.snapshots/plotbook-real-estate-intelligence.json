@@ -1,0 +1,45 @@
+{
+  "domainUrl": "https://plotbook.webforge.me/",
+  "crawlDate": "2026-09-18T12:20:59.558Z",
+  "pages": {
+    "https://plotbook.webforge.me/": {
+      "url": "https://plotbook.webforge.me/",
+      "title": "PlotBook — DDA Layout Maps & Rohini Property CRM",
+      "description": "Browse 362+ official DDA blueprints across Rohini Sectors 1-38. Verify plot numbers, check circle rates, drop pins, and export PDF reports on PlotBook.",
+      "canonical": "https://plotbook.webforge.me/",
+      "h1Text": "Digital PlotBook: Rohini DDA Layout Maps & Dealer CRM",
+      "wordCount": 3197,
+      "status": 200
+    },
+    "https://plotbook.webforge.me/sector/6": {
+      "url": "https://plotbook.webforge.me/sector/6/",
+      "title": "Sector 6 Rohini DDA Map & Pockets | PlotBook",
+      "description": "Official DDA layout plan for Rohini Sector 6. Verify plot numbers across 7 pocket maps, circle rates & road dimensions on PlotBook.",
+      "canonical": "https://plotbook.webforge.me/sector/6/",
+      "h1Text": "Rohini Sector 6 DDA Layout Map & Pocket Plans",
+      "wordCount": 1378,
+      "status": 200
+    },
+    "https://plotbook.webforge.me/guides": {
+      "url": "https://plotbook.webforge.me/guides/",
+      "title": "Rohini Property & DDA Map Guides | PlotBook",
+      "description": "Authoritative guides on Rohini real estate, Delhi circle rates 2025, DDA plot verification, MPD-2041 land pooling, and builder floors investment.",
+      "canonical": "https://plotbook.webforge.me/guides/",
+      "h1Text": "Rohini Real Estate Insights, Circle Rates & DDA Guides",
+      "wordCount": 488,
+      "status": 200
+    },
+    "https://plotbook.webforge.me/sector/34": {
+      "url": "https://plotbook.webforge.me/sector/34/",
+      "title": "Sector 34 Rohini DDA Map & Pockets | PlotBook",
+      "description": "Official DDA layout plan for Rohini Sector 34. Verify plot numbers across 10 pocket maps, circle rates & road dimensions on PlotBook.",
+      "canonical": "https://plotbook.webforge.me/sector/34/",
+      "h1Text": "Rohini Sector 34 DDA Layout Map & Pocket Plans",
+      "wordCount": 1458,
+      "status": 200
+    }
+  },
+  "issueCounts": {
+    "Missing expected Schema.org entities": 3
+  }
+}
