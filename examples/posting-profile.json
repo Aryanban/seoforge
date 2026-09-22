@@ -1,0 +1,14 @@
+{
+  "business": "Aryan Bansal Digital Ecosystem",
+  "website": "https://www.webforge.me/",
+  "audience": "founders and teams evaluating a developer portfolio or GIS product",
+  "topics": ["technology", "software", "business", "education"],
+  "markets": ["India"],
+  "assets": [],
+  "posts_per_week": 2,
+  "evidence_basis": "Illustrative profile. Replace with facts and URLs observed on the actual website before using the plan.",
+  "pages": [
+    { "url": "https://www.webforge.me/projects", "topic": "developer portfolio projects", "status": "existing" },
+    { "url": "https://dholeramap.com/", "topic": "Dholera GIS city map", "status": "existing" }
+  ]
+}

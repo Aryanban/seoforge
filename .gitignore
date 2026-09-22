@@ -2,7 +2,23 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# Crawl data (SQLite store + WAL/SHM sidecars)
+reports/seoforge.db
+reports/*.db-wal
+reports/*.db-shm
+
+# Generated reports
 reports/daily-*.md
+reports/crawl-*.md
+reports/crawl-*.csv
+reports/ai-fix-backlog-*.md
+reports/*.html
+reports/*.md
+reports/*.csv
 reports/.snapshots/
 !reports/.gitkeep
+
+# Local config / secrets
 .env
+seoforge.config.local.json
