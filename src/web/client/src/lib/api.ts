@@ -126,11 +126,64 @@ export interface InspectResult {
     isIndexable: boolean;
     rendered: boolean;
     aeo: { score: number };
-    schema: { hasJsonLd: boolean; typesFound: string[]; missingExpected: string[]; errors: string[] };
-    openGraph?: Record<string, string>;
+    openGraph?: {
+      title?: string;
+      description?: string;
+      image?: string;
+      url?: string;
+      type?: string;
+      incomplete?: boolean;
+    };
+    twitterCard?: {
+      card?: string;
+      title?: string;
+      description?: string;
+      image?: string;
+      incomplete?: boolean;
+    };
     coreWebVitals?: { lcp?: number; cls?: number; inp?: number; fcp?: number };
   };
   issues: { id: string; name: string; severity: "Error" | "Warning" | "Notice"; category: string; message: string }[];
+  contentAnalysis?: {
+    readability: {
+      wordCount: number;
+      sentenceCount: number;
+      syllableCount: number;
+      avgWordsPerSentence: number;
+      avgSyllablesPerWord: number;
+      fleschReadingEase: number;
+      fleschKincaidGrade: number;
+      readingLevel: string;
+      readingTimeMinutes: number;
+    };
+    keywords: {
+      unigrams: Array<{ phrase: string; count: number; density: number; isStuffing: boolean }>;
+      bigrams: Array<{ phrase: string; count: number; density: number; isStuffing: boolean }>;
+      trigrams: Array<{ phrase: string; count: number; density: number; isStuffing: boolean }>;
+    };
+    headings: {
+      items: Array<{ level: number; text: string; id?: string }>;
+      hasSkippedLevels: boolean;
+      h1Count: number;
+      h2Count: number;
+      h3Count: number;
+    };
+    targetKeywordAudit?: {
+      keyword: string;
+      inUrl: boolean;
+      inTitle: boolean;
+      inH1: boolean;
+      inDescription: boolean;
+      inFirst100Words: boolean;
+      inImageAlts: boolean;
+      count: number;
+      density: number;
+      status: "optimal" | "under_optimized" | "over_optimized";
+      recommendations: string[];
+    };
+    first100Words: string;
+  };
+  generatedSchemas?: Record<string, object>;
 }
 
 export function severityClass(sev: string): string {

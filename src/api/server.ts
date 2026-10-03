@@ -48,6 +48,15 @@ import {
   type SavedSearch,
   type SearchQuery,
 } from "../discovery/index.js";
+import { analyzeContent } from "../content-analyzer.js";
+import {
+  generateArticleSchema,
+  generateFaqSchema,
+  generateLocalBusinessSchema,
+  generateBreadcrumbSchema,
+  generateRecommendedSchemas,
+  formatSchemaScript,
+} from "../schema-generator.js";
 
 interface RunningJob {
   crawler: Crawler;
@@ -380,14 +389,67 @@ export function createServer(options: ServerOptions = {}): Hono {
         render?: boolean;
         expectedEntities?: string[];
         canonicalPolicy?: "strict" | "spa";
+        targetKeyword?: string;
       };
       if (!body.url) return c.json({ error: "url is required" }, 400);
-      const { page, issues } = await auditSinglePage(body.url, {
+      const result = await auditSinglePage(body.url, {
         render: body.render,
         expectedEntities: body.expectedEntities,
         canonicalPolicy: body.canonicalPolicy,
+        targetKeyword: body.targetKeyword,
       });
-      return c.json({ page, issues });
+      return c.json(result);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/tools/content-analyze", async (c) => {
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        html?: string;
+        url?: string;
+        targetKeyword?: string;
+      };
+      if (!body.html && !body.url) {
+        return c.json({ error: "Either html or url is required" }, 400);
+      }
+      let html = body.html || "";
+      if (!html && body.url) {
+        const { page } = await auditSinglePage(body.url);
+        // If audit fetched HTML, analyze it
+        const res = analyzeContent(html || "", { url: body.url, targetKeyword: body.targetKeyword });
+        return c.json({ url: body.url, analysis: res });
+      }
+      const analysis = analyzeContent(html, { url: body.url, targetKeyword: body.targetKeyword });
+      return c.json({ analysis });
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/tools/schema-generate", async (c) => {
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        type: "Article" | "FAQPage" | "LocalBusiness" | "BreadcrumbList";
+        data: any;
+      };
+      let schema: object;
+      if (body.type === "Article") {
+        schema = generateArticleSchema(body.data);
+      } else if (body.type === "FAQPage") {
+        schema = generateFaqSchema(body.data.items || []);
+      } else if (body.type === "LocalBusiness") {
+        schema = generateLocalBusinessSchema(body.data);
+      } else if (body.type === "BreadcrumbList") {
+        schema = generateBreadcrumbSchema(body.data.url, body.data.homeName);
+      } else {
+        return c.json({ error: `Unsupported schema type: ${body.type}` }, 400);
+      }
+      return c.json({
+        schema,
+        scriptTag: formatSchemaScript(schema),
+      });
     } catch (err: any) {
       return c.json({ error: err.message }, 500);
     }

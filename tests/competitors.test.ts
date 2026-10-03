@@ -183,4 +183,16 @@ describe("competitor comparison", () => {
     expect(md).toContain("## Metric matrix");
     expect(md).toContain("## Limits");
   });
+
+  it("identifies keyword topic gaps prominent across competitors missing on baseline", () => {
+    const base = mkCrawl({ url: "https://ours.com", name: "ours.com" });
+    const comp = mkCrawl({ url: "https://rival.com", name: "rival.com" });
+    // Add competitor pages with a specific topic phrase in titles/H1s
+    (comp.pages as any)[0].title = "Enterprise Cloud Storage Solutions";
+    (comp.pages as any)[1].title = "Enterprise Cloud Storage Security";
+
+    const comparison = compareCompetitors(base, [comp]);
+    expect(comparison.keywordGaps).toBeDefined();
+    expect(comparison.keywordGaps.some((k) => k.phrase.includes("cloud storage"))).toBe(true);
+  });
 });

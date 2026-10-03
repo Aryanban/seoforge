@@ -171,6 +171,53 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
             </Card>
           )}
 
+          {comparison.keywordGaps?.length > 0 && (
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Content & Topic Gaps (Ahrefs-style)</h2>
+                  <p className="text-xs text-muted">
+                    Topics and keyword phrases prominent across competitor crawls that your crawled pages currently lack
+                  </p>
+                </div>
+                <Badge className="bg-indigo-500/15 text-indigo-300">
+                  {comparison.keywordGaps.length} topic opportunities
+                </Badge>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead>
+                    <tr className="border-b border-border text-faint uppercase text-[10px]">
+                      <th className="py-2 px-3 font-semibold">Missing Topic / Keyword</th>
+                      <th className="py-2 px-3 font-semibold text-right">Competitor Mentions</th>
+                      <th className="py-2 px-3 font-semibold">Covering Competitors</th>
+                      <th className="py-2 px-3 font-semibold">Strategic Recommendation</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {comparison.keywordGaps.map((kg: any, idx: number) => (
+                      <tr key={idx} className="hover:bg-panel2/50">
+                        <td className="py-2.5 px-3 font-semibold text-indigo-300">
+                          {kg.phrase}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-zinc-300">
+                          {kg.competitorOccurrences}x
+                        </td>
+                        <td className="py-2.5 px-3 text-muted">
+                          {kg.competitorsCovering.join(", ")}
+                        </td>
+                        <td className="py-2.5 px-3 text-zinc-300">
+                          {kg.recommendation}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
           <Card className="p-5">
             <h2 className="text-sm font-semibold mb-3">Limits</h2>
             <ul className="space-y-1">

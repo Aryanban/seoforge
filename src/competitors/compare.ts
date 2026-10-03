@@ -13,6 +13,7 @@
  */
 
 import type { CrawlResult, IssueSummary, PageAuditResult } from "../types.js";
+import { extractNgrams } from "../content-analyzer.js";
 
 /** A single comparable metric row in the gap matrix. */
 export interface CompetitorMetric {
@@ -40,6 +41,15 @@ export interface CompetitorGap {
   recommendation: string;
 }
 
+/** Topic and keyword gap — phrases prominent across competitors that baseline is missing. */
+export interface KeywordTopicGap {
+  phrase: string;
+  competitorOccurrences: number;
+  baselineOccurrences: number;
+  competitorsCovering: string[];
+  recommendation: string;
+}
+
 export interface CompetitorComparison {
   baselineUrl: string;
   baselineCrawlId: string;
@@ -50,6 +60,7 @@ export interface CompetitorComparison {
   budgetComparable: boolean;
   metrics: CompetitorMetric[];
   gaps: CompetitorGap[];
+  keywordGaps: KeywordTopicGap[];
   /** Metrics where the baseline leads every competitor. */
   strengths: string[];
   summary: string;
@@ -61,6 +72,8 @@ function avg(values: number[]): number | null {
   if (usable.length === 0) return null;
   return usable.reduce((sum, v) => sum + v, 0) / usable.length;
 }
+
+const getCrawlUrl = (c: CrawlResult): string => c.domainName ?? c.targetUrl;
 
 function pagesOf(crawl: CrawlResult): PageAuditResult[] {
   return (crawl.pages ?? []).filter((p) => p.status > 0);
@@ -240,6 +253,8 @@ export function compareCompetitors(
 
   gaps.sort((a, b) => (a.severity === "Warning" ? -1 : 1) - (b.severity === "Warning" ? -1 : 1));
 
+  const keywordGaps = findKeywordTopicGaps(baseline, competitors);
+
   return {
     baselineUrl: competitorUrl(baseline),
     baselineCrawlId: baseline.id,
@@ -250,6 +265,7 @@ export function compareCompetitors(
     budgetComparable,
     metrics,
     gaps,
+    keywordGaps,
     strengths,
     summary: buildSummary(baseline, gaps.length, strengths.length, budgetComparable),
     limitations: [
@@ -262,6 +278,57 @@ export function compareCompetitors(
       "The same rules apply to the baseline and every competitor; do not declare a numerical winner on uneven evidence.",
     ],
   };
+}
+
+function findKeywordTopicGaps(baseline: CrawlResult, competitors: CrawlResult[]): KeywordTopicGap[] {
+  const baselinePages = pagesOf(baseline);
+  const baselineText = baselinePages
+    .map((p) => `${p.title ?? ""} ${p.description ?? ""} ${p.h1Text ?? ""}`)
+    .join(" ")
+    .toLowerCase();
+
+  const compPhraseMap = new Map<string, { count: number; sources: Set<string> }>();
+
+  for (const c of competitors) {
+    const compText = pagesOf(c)
+      .map((p) => `${p.title ?? ""} ${p.description ?? ""} ${p.h1Text ?? ""}`)
+      .join(" ");
+
+    const ngrams = [
+      ...extractNgrams(compText, 2, 2),
+      ...extractNgrams(compText, 3, 2),
+    ];
+
+    const compDomain = getCrawlUrl(c);
+    for (const ng of ngrams) {
+      const existing = compPhraseMap.get(ng.phrase) || { count: 0, sources: new Set<string>() };
+      existing.count += ng.count;
+      existing.sources.add(compDomain);
+      compPhraseMap.set(ng.phrase, existing);
+    }
+  }
+
+  const keywordGaps: KeywordTopicGap[] = [];
+
+  for (const [phrase, info] of compPhraseMap.entries()) {
+    if (info.count < 2) continue;
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`, "gi");
+    const baselineOccurrences = (baselineText.match(regex) || []).length;
+
+    if (baselineOccurrences === 0) {
+      const sourceList = Array.from(info.sources);
+      keywordGaps.push({
+        phrase,
+        competitorOccurrences: info.count,
+        baselineOccurrences: 0,
+        competitorsCovering: sourceList,
+        recommendation: `Competitors actively target topic "${phrase}" (${info.count} mentions across ${sourceList.join(", ")}), but your pages lack it. Create targeted content or add subheadings to capture this search demand.`,
+      });
+    }
+  }
+
+  return keywordGaps.sort((a, b) => b.competitorOccurrences - a.competitorOccurrences).slice(0, 10);
 }
 
 function gapRecommendation(key: string, direction: "higher" | "lower"): string {
@@ -373,6 +440,16 @@ export function comparisonMarkdown(comparison: CompetitorComparison): string {
     });
   } else {
     lines.push("", "No metric gaps were found — the baseline leads or matches on every measure.", "");
+  }
+
+  if (comparison.keywordGaps && comparison.keywordGaps.length > 0) {
+    lines.push("", "## Content & Topic Gaps (Keywords prominent across competitors missing on baseline)", "");
+    lines.push("| Missing Topic / Keyword | Competitor Mentions | Competitors Covering | Recommendation |");
+    lines.push("|---|---|---|---|");
+    for (const kg of comparison.keywordGaps) {
+      lines.push(`| **${kg.phrase}** | ${kg.competitorOccurrences} | ${kg.competitorsCovering.join(", ")} | ${kg.recommendation} |`);
+    }
+    lines.push("");
   }
 
   lines.push("## Limits", "", ...comparison.limitations.map((s) => `- ${s}`));

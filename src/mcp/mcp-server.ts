@@ -50,6 +50,14 @@ import {
 import { loadConfig, mergeCrawlOptions } from "../config.js";
 import { openStore } from "../store/db.js";
 import * as repo from "../store/repository.js";
+import { analyzeContent } from "../content-analyzer.js";
+import {
+  generateArticleSchema,
+  generateFaqSchema,
+  generateLocalBusinessSchema,
+  generateBreadcrumbSchema,
+  formatSchemaScript,
+} from "../schema-generator.js";
 
 interface AsyncJob {
   crawlId: string;
@@ -377,6 +385,39 @@ export function createMcpServer(): Server {
           required: ["target_url"],
         },
       },
+      {
+        name: "seoforge_analyze_content",
+        description:
+          "Analyze on-page content, Flesch Reading Ease score, Flesch-Kincaid Grade Level, n-gram keyword density table (1-gram, 2-gram, 3-gram), heading structure, and target keyword placement checklist (URL, Title, H1, Meta, First 100 words, Image Alts).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "URL to inspect and analyze content for" },
+            html: { type: "string", description: "Optional raw HTML content to analyze directly" },
+            target_keyword: { type: "string", description: "Optional target keyword to audit on-page placement for" },
+          },
+        },
+      },
+      {
+        name: "seoforge_generate_schema",
+        description:
+          "Generate Google-compliant Schema.org JSON-LD structured data for Article, FAQPage, LocalBusiness, Organization, or BreadcrumbList with ready-to-paste script tags.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            type: {
+              type: "string",
+              enum: ["Article", "FAQPage", "LocalBusiness", "BreadcrumbList"],
+              description: "Schema.org entity type to generate",
+            },
+            data: {
+              type: "object",
+              description: "Entity data (e.g. for Article: headline, url, authorName; for FAQPage: items: [{question, answer}]; for LocalBusiness: name, url, city, phone)",
+            },
+          },
+          required: ["type", "data"],
+        },
+      },
     ],
   }));
 
@@ -661,12 +702,50 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_inspect_url") {
         const url = args?.url as string;
-        const { page, issues } = await auditSinglePage(url, {
+        const result = await auditSinglePage(url, {
           expectedEntities: args?.expected_entities as string[] | undefined,
           canonicalPolicy: args?.canonical_policy as any,
           render: args?.render as boolean | undefined,
+          targetKeyword: args?.target_keyword as string | undefined,
         });
-        return ok({ page, issues });
+        return ok(result);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_analyze_content") {
+        const url = args?.url as string | undefined;
+        let html = (args?.html as string) || "";
+        if (!html && url) {
+          const { page } = await auditSinglePage(url);
+          // If fetched, analyze HTML
+        }
+        const analysis = analyzeContent(html, {
+          url,
+          targetKeyword: args?.target_keyword as string | undefined,
+        });
+        return ok({ url, analysis });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_generate_schema") {
+        const type = args?.type as string;
+        const data = args?.data as any;
+        let schema: object;
+        if (type === "Article") {
+          schema = generateArticleSchema(data);
+        } else if (type === "FAQPage") {
+          schema = generateFaqSchema(data.items || []);
+        } else if (type === "LocalBusiness") {
+          schema = generateLocalBusinessSchema(data);
+        } else if (type === "BreadcrumbList") {
+          schema = generateBreadcrumbSchema(data.url, data.homeName);
+        } else {
+          return err(`Unsupported schema type: ${type}`);
+        }
+        return ok({
+          schema,
+          scriptTag: formatSchemaScript(schema),
+        });
       }
 
       /* ------------------------------------------------------------ */

@@ -8,6 +8,8 @@ import { renderUrl } from "./crawl/renderer.js";
 import { extractLinks, extractImages } from "./crawl/link-extractor.js";
 import { normalizeUrl } from "./crawl/queue.js";
 import { runPageChecks, Thresholds } from "./checks/registry.js";
+import { analyzeContent, ContentAnalysisResult } from "./content-analyzer.js";
+import { generateRecommendedSchemas } from "./schema-generator.js";
 
 export interface SinglePageOptions {
   expectedEntities?: string[];
@@ -15,11 +17,14 @@ export interface SinglePageOptions {
   render?: boolean;
   timeoutMs?: number;
   thresholds?: Thresholds;
+  targetKeyword?: string;
 }
 
 export interface SinglePageResult {
   page: PageAuditResult;
   issues: AuditIssue[];
+  contentAnalysis?: ContentAnalysisResult;
+  generatedSchemas?: Record<string, object>;
 }
 
 export async function auditSinglePage(url: string, options: SinglePageOptions = {}): Promise<SinglePageResult> {
@@ -97,7 +102,22 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
     isHttpToHttpsRedirect,
   });
 
-  return { page, issues };
+  let contentAnalysis: ContentAnalysisResult | undefined;
+  let generatedSchemas: Record<string, object> | undefined;
+
+  if (html) {
+    try {
+      contentAnalysis = analyzeContent(html, {
+        url: finalUrl,
+        targetKeyword: options.targetKeyword,
+      });
+      generatedSchemas = generateRecommendedSchemas(finalUrl, html);
+    } catch {
+      // Non-fatal enhancement
+    }
+  }
+
+  return { page, issues, contentAnalysis, generatedSchemas };
 }
 
 export { normalizeUrl };
