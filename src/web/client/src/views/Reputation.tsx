@@ -77,11 +77,60 @@ export default function Reputation() {
     }
   }
 
+  const [discovering, setDiscovering] = useState(false);
+  const [discoveryNote, setDiscoveryNote] = useState("");
+
+  async function discoverSources() {
+    if (!form.target || !form.brand) {
+      setError("Please provide target URL and brand name to auto-discover sources.");
+      return;
+    }
+    setDiscovering(true);
+    setError("");
+    setDiscoveryNote("");
+    try {
+      let hostname = "";
+      try {
+        hostname = new URL(form.target.startsWith("http") ? form.target : `https://${form.target}`).hostname;
+      } catch {}
+
+      const queries = [
+        { query: `"${form.brand}"${hostname ? ` -site:${hostname}` : ""}` },
+        { query: `"${form.brand}" review` }
+      ];
+
+      const r = await api<{ result: { candidates: Array<{ url: string }> } }>(`/api/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_url: form.target,
+          queries,
+          max_candidates: 25,
+          max_requests: 10
+        })
+      });
+
+      const newUrls = (r.result?.candidates || []).map((c) => c.url).filter(Boolean);
+      if (newUrls.length === 0) {
+        setDiscoveryNote("No candidate sources found via public search. Add URLs manually.");
+      } else {
+        const existing = form.sources.split("\n").map((s) => s.trim()).filter(Boolean);
+        const combined = Array.from(new Set([...existing, ...newUrls]));
+        setForm({ ...form, sources: combined.join("\n") });
+        setDiscoveryNote(`Discovered ${newUrls.length} candidate source(s) from DuckDuckGo/Bing!`);
+      }
+    } catch (err: any) {
+      setError(`Discovery notice: ${err.message || String(err)}`);
+    } finally {
+      setDiscovering(false);
+    }
+  }
+
   return (
     <div>
       <PageHeader
-        title="Reputation"
-        subtitle="Verify candidate backlink/mention sources and score them under model 1.1 — conservative: unknown evidence is never inflated, low-confidence headlines cap at 49/100."
+        title="Reputation & Backlink Intelligence"
+        subtitle="Discover candidate backlink/mention sources across the open web and verify them under conservative mathematical scoring."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
@@ -92,7 +141,18 @@ export default function Reputation() {
             <Input placeholder="Brand name *" value={form.brand} onChange={(e: any) => setForm({ ...form, brand: e.target.value })} />
             <Input placeholder="Brand aliases (comma-separated)" value={form.aliases} onChange={(e: any) => setForm({ ...form, aliases: e.target.value })} />
             <div>
-              <div className="text-[10px] uppercase tracking-wide text-faint mb-1">Candidate source URLs (one per line)</div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] uppercase tracking-wide text-faint">Candidate source URLs (one per line)</span>
+                <Button 
+                  onClick={discoverSources} 
+                  variant="secondary" 
+                  disabled={discovering || busy}
+                  className="text-[10px] py-1 px-2.5"
+                >
+                  {discovering ? "Searching Web…" : "Auto-Discover (DuckDuckGo / Bing)"}
+                </Button>
+              </div>
+              {discoveryNote && <div className="text-[11px] text-emerald-400 mb-1.5 font-medium">{discoveryNote}</div>}
               <textarea
                 className="w-full bg-bg border border-border rounded-md p-2 text-xs text-white font-mono h-28"
                 placeholder={"https://en.wikipedia.org/wiki/Example.com\nhttps://news.example.com/article"}
@@ -100,7 +160,7 @@ export default function Reputation() {
                 onChange={(e) => setForm({ ...form, sources: e.target.value })}
               />
             </div>
-            <Button onClick={run} variant="primary" disabled={busy}>
+            <Button onClick={run} variant="primary" disabled={busy || discovering}>
               {busy ? "Verifying…" : "Verify & score"}
             </Button>
             {error && <div className="text-xs text-red-400">{error}</div>}

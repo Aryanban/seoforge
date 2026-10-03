@@ -37,6 +37,17 @@ import {
   type SourceRow,
 } from "../reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "../competitors/index.js";
+import {
+  discover,
+  discoveryMarkdown,
+  sourcesCsv,
+  candidatesToRows,
+  hostAttempts,
+  type HostRecord,
+  type NativeProvider,
+  type SavedSearch,
+  type SearchQuery,
+} from "../discovery/index.js";
 
 interface RunningJob {
   crawler: Crawler;
@@ -525,6 +536,76 @@ export function createServer(options: ServerOptions = {}): Hono {
     const comparison = repo.getCompetitorComparison(db, c.req.param("id"));
     if (!comparison) return c.json({ error: "Comparison not found" }, 404);
     return c.json({ comparison, markdown: comparisonMarkdown(comparison) });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Discovery (search leads)                                         */
+  /* ---------------------------------------------------------------- */
+
+  app.post("/api/discover", async (c) => {
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        target_url: string;
+        queries?: SearchQuery[];
+        providers?: NativeProvider[];
+        candidates?: string[];
+        saved_searches?: SavedSearch[];
+        host_records?: HostRecord[];
+        offline?: boolean;
+        max_requests?: number;
+        max_queries?: number;
+        max_candidates?: number;
+        timeout_seconds?: number;
+        seconds?: number;
+        out_dir?: string;
+      };
+      if (!body.target_url) return c.json({ error: "target_url is required" }, 400);
+      if (
+        !(body.queries?.length || body.candidates?.length || body.saved_searches?.length || body.host_records?.length)
+      ) {
+        return c.json({ error: "Provide queries[], candidates[], saved_searches[] or host_records[]" }, 400);
+      }
+      const outDir = body.out_dir ?? path.join(baseDir, "reports", "discovery");
+      const result = await discover(body.queries ?? [], outDir, {
+        target: body.target_url,
+        providers: body.providers,
+        hostRecords: body.host_records?.length ? hostAttempts(body.host_records) : [],
+        candidates: body.candidates ?? [],
+        saved: body.saved_searches ?? [],
+        offline: !!body.offline,
+        maxRequests: body.max_requests,
+        maxQueries: body.max_queries,
+        maxCandidates: body.max_candidates,
+        timeoutMs: body.timeout_seconds ? body.timeout_seconds * 1000 : undefined,
+        seconds: body.seconds,
+      });
+      await fs.writeFile(
+        path.join(outDir, "sources.csv"),
+        sourcesCsv(candidatesToRows(result.candidates)),
+      );
+      await fs.writeFile(path.join(outDir, "discovery.md"), discoveryMarkdown(result));
+      const id = `disc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      repo.saveDiscoveryRun(db, result, id);
+      return c.json({
+        discoveryId: id,
+        result,
+        markdown: discoveryMarkdown(result),
+        sources_csv: path.join(outDir, "sources.csv"),
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.get("/api/discover", (c) => {
+    const targetUrl = c.req.query("target") || undefined;
+    return c.json({ runs: repo.listDiscoveryRuns(db, 25, targetUrl) });
+  });
+
+  app.get("/api/discover/:id", (c) => {
+    const result = repo.getDiscoveryRun(db, c.req.param("id"));
+    if (!result) return c.json({ error: "Discovery run not found" }, 404);
+    return c.json({ result, markdown: discoveryMarkdown(result) });
   });
 
   /* ---------------------------------------------------------------- */

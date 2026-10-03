@@ -3,7 +3,7 @@
  */
 import fs from "fs/promises";
 import path from "path";
-import { CrawlResult, IssueSummary } from "../types.js";
+import { CrawlResult, IssueSummary, OverallAuditReport } from "../types.js";
 import { generateFixBacklogMarkdown } from "../ai/recommendations.js";
 
 export function generateCrawlMarkdown(result: CrawlResult): string {
@@ -92,7 +92,7 @@ export function generateCrawlMarkdown(result: CrawlResult): string {
 }
 
 export async function saveMarkdownReport(
-  result: CrawlResult,
+  result: CrawlResult | OverallAuditReport,
   baseDir: string = process.cwd()
 ): Promise<string> {
   const reportsDir = path.join(baseDir, "reports");
@@ -100,11 +100,14 @@ export async function saveMarkdownReport(
   const dateStr = new Date().toISOString().split("T")[0];
 
   const crawlPath = path.join(reportsDir, `crawl-${dateStr}.md`);
-  await fs.writeFile(crawlPath, generateCrawlMarkdown(result), "utf-8");
+  await fs.writeFile(crawlPath, generateMarkdownReport(result), "utf-8");
 
-  if (result.recommendations.length > 0) {
+  // The multi-domain OverallAuditReport has no AI recommendations; only the
+  // single-site CrawlResult carries a prioritised fix backlog.
+  const recs = (result as CrawlResult).recommendations;
+  if (recs && recs.length > 0) {
     const backlogPath = path.join(reportsDir, `ai-fix-backlog-${dateStr}.md`);
-    await fs.writeFile(backlogPath, generateFixBacklogMarkdown(result.recommendations), "utf-8");
+    await fs.writeFile(backlogPath, generateFixBacklogMarkdown(recs), "utf-8");
   }
 
   return crawlPath;

@@ -36,6 +36,17 @@ import {
   type SourceRow,
 } from "../reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "../competitors/index.js";
+import {
+  discover,
+  discoveryMarkdown,
+  sourcesCsv,
+  candidatesToRows,
+  hostAttempts,
+  type HostRecord,
+  type NativeProvider,
+  type SavedSearch,
+  type SearchQuery,
+} from "../discovery/index.js";
 import { loadConfig, mergeCrawlOptions } from "../config.js";
 import { openStore } from "../store/db.js";
 import * as repo from "../store/repository.js";
@@ -86,7 +97,7 @@ export function createMcpServer(): Server {
         inputSchema: {
           type: "object",
           properties: {
-            url: { type: "string", description: "Root URL to crawl (e.g. 'https://dholeramap.com'). Uses the first configured domain if omitted." },
+            url: { type: "string", description: "Root URL to crawl (e.g. 'https://www.webforge.me'). Uses the first configured domain if omitted." },
             domain: { type: "string", description: "Name or URL substring of a configured domain to crawl." },
             max_depth: { type: "number", description: "Maximum crawl depth (default 10)." },
             limit: { type: "number", description: "Crawl budget — maximum pages to fetch (default 1000)." },
@@ -308,6 +319,62 @@ export function createMcpServer(): Server {
             limit: { type: "number", description: "Crawl budget when crawling live (default 50)" },
           },
           required: [],
+        },
+      },
+      {
+        name: "seoforge_discover_sources",
+        description: "Discover candidate backlink/mention sources for a site from bounded public search, saved result-page snapshots, or supplied URLs — without an API key or paid index. Tries recorded host search results first, then native providers (DuckDuckGo HTML, Bing RSS) with zero retries and a strict request budget. Every result is an UNVERIFIED LEAD: feed the returned candidates to seoforge_reputation_report to verify actual links and mentions on the pages. Honours robots per provider; offline mode imports supplied evidence only.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            target_url: { type: "string", description: "Your site URL; own-site results are filtered out of the leads" },
+            queries: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  query: { type: "string" },
+                  market: { type: "string" },
+                  language: { type: "string" },
+                },
+                required: ["query"],
+              },
+              description: "Search queries to run (e.g. \"\\\"Brand\\\" -site:example.com\")",
+            },
+            providers: {
+              type: "array",
+              items: { type: "string", enum: ["duckduckgo-html", "bing-rss"] },
+              description: "Native providers to try in order (default both)",
+            },
+            candidates: { type: "array", items: { type: "string" }, description: "Candidate URLs already known (skips searching for them)" },
+            saved_searches: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  path: { type: "string" },
+                  provider: { type: "string", enum: ["duckduckgo-html", "bing-rss", "bing", "google"] },
+                  query: { type: "string" },
+                  captured_at: { type: "string" },
+                },
+                required: ["path", "provider", "query", "captured_at"],
+              },
+              description: "Saved result-page HTML snapshots on disk to import instead of searching live",
+            },
+            host_records: {
+              type: "array",
+              items: { type: "object" },
+              description: "Search attempts recorded by your own search tool ({provider, query, captured_at, status, evidence, results})",
+            },
+            offline: { type: "boolean", description: "Never make a live search request; imports/supplied URLs only" },
+            max_requests: { type: "number", description: "Total native request budget, 1-100 (default 16)" },
+            max_queries: { type: "number", description: "Queries to process, 1-20 (default 8)" },
+            max_candidates: { type: "number", description: "Candidate URLs to keep, 1-500 (default 100)" },
+            timeout_seconds: { type: "number", description: "Per-request timeout seconds, 1-30 (default 12)" },
+            seconds: { type: "number", description: "Wall-clock budget seconds, 1-300 (default 90)" },
+            out_dir: { type: "string", description: "Write discovery.json + sources.csv + markdown under this directory" },
+          },
+          required: ["target_url"],
         },
       },
     ],
@@ -929,6 +996,67 @@ export function createMcpServer(): Server {
           gaps: comparison.gaps,
           metrics: comparison.metrics,
           markdown: comparisonMarkdown(comparison),
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_discover_sources") {
+        const target = args?.target_url as string;
+        if (!target) return err("target_url is required.");
+        const queries = (args?.queries as SearchQuery[]) ?? [];
+        const candidates = (args?.candidates as string[]) ?? [];
+        const saved = (args?.saved_searches as SavedSearch[]) ?? [];
+        const hostRecords = (args?.host_records as HostRecord[]) ?? [];
+        if (queries.length === 0 && candidates.length === 0 && saved.length === 0 && hostRecords.length === 0) {
+          return err("Provide queries[], candidates[], saved_searches[] or host_records[].");
+        }
+        const outDir = (args?.out_dir as string) ?? path.join(process.cwd(), "reports", "discovery");
+        const timeoutSeconds = numArg(args?.timeout_seconds);
+        const result = await discover(queries, outDir, {
+          target,
+          providers: (args?.providers as NativeProvider[]) ?? undefined,
+          hostRecords: hostRecords.length > 0 ? hostAttempts(hostRecords) : [],
+          candidates,
+          saved,
+          offline: !!args?.offline,
+          maxRequests: numArg(args?.max_requests),
+          maxQueries: numArg(args?.max_queries),
+          maxCandidates: numArg(args?.max_candidates),
+          timeoutMs: timeoutSeconds ? Math.round(timeoutSeconds * 1000) : undefined,
+          seconds: numArg(args?.seconds),
+        });
+        await fs.writeFile(
+          path.join(outDir, "sources.csv"),
+          sourcesCsv(candidatesToRows(result.candidates)),
+        );
+        await fs.writeFile(path.join(outDir, "discovery.md"), discoveryMarkdown(result));
+
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const id = `disc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        repo.saveDiscoveryRun(db, result, id);
+        return ok({
+          discoveryId: id,
+          status: result.status,
+          search_available: result.search_available,
+          candidates: result.candidates.map((c) => ({
+            url: c.url,
+            verification: c.verification,
+            first_observed: c.provenance[0]?.provider,
+            query: c.provenance[0]?.query,
+          })),
+          candidate_count: result.candidate_count,
+          attempts: result.attempts.map((a) => ({
+            provider: a.provider,
+            query: a.query,
+            status: a.status,
+            accepted_leads: a.accepted_leads ?? a.results.length,
+          })),
+          native_requests: result.native_requests,
+          request_budget: result.request_budget,
+          candidate_budget_reached: result.candidate_budget_reached,
+          note: result.note,
+          sources_csv: path.join(outDir, "sources.csv"),
+          next_step: "Candidates are unverified leads. Verify with seoforge_reputation_report (target_url + brand + these URLs).",
         });
       }
 

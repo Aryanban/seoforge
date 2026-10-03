@@ -71,13 +71,13 @@ Crawl a site:
 
 ```bash
 # Full-site crawl with the terminal report
-node dist/cli.js crawl https://dholeramap.com --limit 200 --depth 5
+node dist/cli.js crawl https://example.com --limit 200 --depth 5
 
 # SPA support via Playwright
-node dist/cli.js crawl https://dholeramap.com --render
+node dist/cli.js crawl https://example.com --render
 
 # Save markdown + AI fix-backlog reports to reports/
-node dist/cli.js crawl https://dholeramap.com --limit 500 --save
+node dist/cli.js crawl https://example.com --limit 500 --save
 ```
 
 Launch the dashboard:
@@ -98,6 +98,9 @@ node dist/cli.js serve          # → http://127.0.0.1:5173
 | `export <md\|csv\|html>` | Export the latest crawl (or `--crawl <id>`); CSV kinds: `pages`, `issues`, `links`, `recommendations` |
 | `audit` | v1-compatible multi-domain audit with `--sample` sitemap sampling |
 | `publish [query]` | Browse the 206-source publishing catalog (`--category --kind --status`), or build a tailored posting plan from a `--profile` JSON |
+| `discover` | Collect **unverified** backlink/mention leads: native search (`--query`, `--provider`), saved result-page HTML, host-recorded results, or supplied URLs (`--offline` for zero network) |
+| `search-plan` | Plan Google discovery navigation URLs for manual capture (never searches) |
+| `search-import [files...]` | Extract candidate URLs from saved search result-page HTML |
 | `reputation` | Verify candidate backlink/mention sources and score model 1.1 (`--target --brand --sources`) |
 | `compare` | Competitor gap analysis from stored crawls (`--crawl --competitors`) or live URLs (`--target --competitor-urls`) |
 | `indexnow --urls a,b` | Dispatch changed URLs to Bing & Yandex |
@@ -112,11 +115,17 @@ Publishing and reputation examples:
 node dist/cli.js publish --profile examples/posting-profile.json --limit 15 --out reports/posting
 
 # Score your backlink evidence from a list of candidate source URLs
-node dist/cli.js reputation --target https://dholeramap.com --brand "DholeraMap" \
+node dist/cli.js reputation --target https://example.com --brand "Example" \
   --sources reports/sources.txt --out reports/reputation
 
 # Compare against competitors from stored crawls
 node dist/cli.js compare --crawl crawl_123 --competitors crawl_456,crawl_789
+
+# Collect unverified leads, then verify them (leads → reputation pipeline)
+node dist/cli.js discover --target https://example.com --query '"Example" -site:example.com' \
+  --out reports/discovery
+node dist/cli.js reputation --target https://example.com --brand "Example" \
+  --sources reports/discovery/sources.csv --out reports/reputation
 ```
 
 ---
@@ -138,6 +147,8 @@ loopback REST API:
 | `GET /api/publish/catalog` | Browse the 206-source publishing catalog |
 | `POST /api/publish/plan` | Build a tailored posting plan from a profile |
 | `POST /api/reputation` | Verify sources and score model 1.1 |
+| `POST /api/discover` | Collect unverified search leads (`offline` for zero network) |
+| `GET /api/discover` / `/api/discover/:id` | List / fetch discovery runs |
 | `POST /api/competitors/compare` | Competitor gap analysis |
 | `POST /api/inspect` | Single-page inspection |
 
@@ -146,7 +157,7 @@ via SSE.
 
 ---
 
-## 🔌 MCP server (17 tools)
+## 🔌 MCP server (18 tools)
 
 Give any MCP-compatible client (Claude Desktop, Cursor, Antigravity, Zed) the ability to
 run audits autonomously:
@@ -180,6 +191,7 @@ run audits autonomously:
 | `seoforge_generate_aeo_snippet` | Inverted-pyramid answer + FAQ JSON-LD generator |
 | `seoforge_publishing_plan` | Tailored posting plan from the 206-source catalog, or catalog browse |
 | `seoforge_reputation_report` | Verify candidate sources + model-1.1 reputation score |
+| `seoforge_discover_sources` | Collect unverified backlink/mention leads (native search, saved HTML, supplied URLs) → feeds `seoforge_reputation_report` |
 | `seoforge_compare_competitors` | Competitor gap matrix on crawl evidence |
 | `seoforge_daily_run` | Full daily routine (audit + report + IndexNow) |
 

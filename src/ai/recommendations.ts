@@ -176,7 +176,7 @@ export const FIX_LIBRARY: Record<string, FixLibraryEntry> = {
     ],
     beforeAfter: {
       before: "<title>Home</title>",
-      after: "<title>Dholera SIR Land Price Map — Live Plot Rates | DholeraMap</title>",
+      after: "<title>Developer Portfolio — Projects & Skills | Webforge</title>",
     },
   },
   meta_desc_missing: {
@@ -352,7 +352,7 @@ export const FIX_LIBRARY: Record<string, FixLibraryEntry> = {
   generic_anchor_text: {
     effort: "S",
     impact: "Generic anchors ('click here') carry no keyword context and are ignored by AI extractors.",
-    steps: ['Rewrite anchors as descriptive phrases, e.g. "compare Dholera plot rates".'],
+    steps: ['Rewrite anchors as descriptive phrases, e.g. "browse portfolio projects".'],
   },
   blocked_by_robots: {
     effort: "S",

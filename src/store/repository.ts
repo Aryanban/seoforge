@@ -10,6 +10,7 @@ import {
   RecommendationDoc,
 } from "../types.js";
 import type { CompetitorComparison } from "../competitors/compare.js";
+import type { DiscoveryResult } from "../discovery/types.js";
 import type { PublishingPlan } from "../publishing/types.js";
 import type { ReputationResult } from "../reputation/types.js";
 import { buildIssueSummary } from "../checks/summary.js";
@@ -769,4 +770,70 @@ function tryParse<T>(value: unknown, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Discovery runs (search leads)
+// ---------------------------------------------------------------------------
+
+export function saveDiscoveryRun(db: DatabaseSync, run: DiscoveryResult, id: string): void {
+  db.prepare(
+    `INSERT OR REPLACE INTO discovery_runs
+      (id, target_url, status, candidate_count, queries_processed, search_available,
+       result_json, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  ).run(
+    id,
+    run.target,
+    run.status,
+    run.candidate_count,
+    run.queries_processed,
+    run.search_available ? 1 : 0,
+    JSON.stringify(run),
+    run.created_at,
+  );
+}
+
+export function getDiscoveryRun(db: DatabaseSync, id: string): DiscoveryResult | null {
+  const row = db
+    .prepare(`SELECT result_json FROM discovery_runs WHERE id = ?`)
+    .get(id) as Row | undefined;
+  if (!row?.result_json) return null;
+  try {
+    return JSON.parse(row.result_json) as DiscoveryResult;
+  } catch {
+    return null;
+  }
+}
+
+export function listDiscoveryRuns(
+  db: DatabaseSync,
+  limit = 25,
+  targetUrl?: string,
+): Array<{
+  id: string;
+  target: string;
+  status: string;
+  candidateCount: number;
+  queriesProcessed: number;
+  searchAvailable: boolean;
+  createdAt: string;
+}> {
+  const sql = targetUrl
+    ? `SELECT id, target_url, status, candidate_count, queries_processed, search_available, created_at
+       FROM discovery_runs WHERE target_url = ? ORDER BY created_at DESC LIMIT ?`
+    : `SELECT id, target_url, status, candidate_count, queries_processed, search_available, created_at
+       FROM discovery_runs ORDER BY created_at DESC LIMIT ?`;
+  const rows = targetUrl
+    ? (db.prepare(sql).all(targetUrl, limit) as Row[])
+    : (db.prepare(sql).all(limit) as Row[]);
+  return rows.map((r) => ({
+    id: r.id,
+    target: r.target_url,
+    status: r.status,
+    candidateCount: r.candidate_count,
+    queriesProcessed: r.queries_processed,
+    searchAvailable: !!r.search_available,
+    createdAt: r.created_at,
+  }));
 }

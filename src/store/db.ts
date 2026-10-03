@@ -161,6 +161,18 @@ CREATE TABLE IF NOT EXISTS publishing_plans (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plans_website ON publishing_plans(website);
+
+CREATE TABLE IF NOT EXISTS discovery_runs (
+  id TEXT PRIMARY KEY,
+  target_url TEXT NOT NULL,
+  status TEXT NOT NULL,
+  candidate_count INTEGER DEFAULT 0,
+  queries_processed INTEGER DEFAULT 0,
+  search_available INTEGER DEFAULT 0,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_target ON discovery_runs(target_url);
 `;
 
 export interface StoreOptions {

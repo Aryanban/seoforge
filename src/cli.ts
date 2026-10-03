@@ -45,6 +45,20 @@ import {
   type SourceRow,
 } from "./reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "./competitors/index.js";
+import {
+  discover,
+  hostAttempts,
+  importSearchHtml,
+  writeSearchPlan,
+  discoveryMarkdown,
+  searchPlanMarkdown,
+  searchImportMarkdown,
+  sourcesCsv,
+  candidatesToRows,
+  type NativeProvider,
+  type SavedSearch,
+  type SearchQuery,
+} from "./discovery/index.js";
 import { startMcpServer } from "./mcp/mcp-server.js";
 import { startServer } from "./api/server.js";
 import { loadConfig, mergeCrawlOptions } from "./config.js";
@@ -478,6 +492,180 @@ function splitCsvLine(line: string): string[] {
   out.push(current);
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Command: discover — bounded search leads for reputation research      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Commander gives a scalar (last value wins) for a repeated option unless a
+ * collector is supplied, so every "repeatable" flag uses this to build an
+ * array — including for the first, and for zero, occurrences.
+ */
+function collect(value: string, previous: string[] = []): string[] {
+  return [...previous, value];
+}
+
+program
+  .command("discover")
+  .description("Collect unverified backlink/mention leads from bounded search, imports or supplied URLs")
+  .requiredOption("-t, --target <url>", "Your site URL (own-site results are filtered out)")
+  .option("-q, --query <text>", "A search query (repeatable)", collect, [] as string[])
+  .option("--queries <path>", "JSON array of { query, market, language } specifications")
+  .option("--market <code>", "Requested market applied to every --query term")
+  .option("--language <code>", "Requested language applied to every --query term")
+  .option("--provider <name>", "Native provider: duckduckgo-html | bing-rss (repeatable)", collect, [] as string[])
+  .option("--host-results <path>", "JSON with search attempts recorded by your own search tool")
+  .option("--saved-search <path>", "JSON list of saved HTML { path, provider, query, captured_at } records")
+  .option("--candidate <url>", "A known candidate URL (repeatable)", collect, [] as string[])
+  .option("--sources-csv <path>", "CSV/JSON source list merged as supplied candidates")
+  .option("--offline", "Never make a live search request")
+  .option("--max-requests <n>", "Total native request budget (1-100)", "16")
+  .option("--max-queries <n>", "Queries to process (1-20)", "8")
+  .option("--max-candidates <n>", "Candidate URLs to keep (1-500)", "100")
+  .option("--timeout <s>", "Per-request timeout seconds (1-30)", "12")
+  .option("--seconds <n>", "Wall-clock budget seconds (1-300)", "90")
+  .option("--cache <dir>", "Reuse successful native responses from this cache directory")
+  .option("--out <dir>", "Save discovery.json + sources.csv + markdown to this directory")
+  .action(async (options) => {
+    if ((options.query ?? []).length === 0 && !options.queries && !options.savedSearch && (options.candidate ?? []).length === 0 && !options.sourcesCsv) {
+      console.error(red("Provide --query (repeatable), --queries, --saved-search, or --candidate URLs."));
+      process.exit(1);
+    }
+    const queries: SearchQuery[] = [];
+    if (options.queries) {
+      const parsed = JSON.parse(await fs.readFile(options.queries, "utf-8"));
+      if (!Array.isArray(parsed)) {
+        console.error(red("--queries must be a JSON array of { query, market, language } objects."));
+        process.exit(1);
+      }
+      queries.push(...parsed);
+    }
+    for (const q of (options.query as string[]) ?? []) {
+      queries.push({ query: q, market: options.market, language: options.language });
+    }
+
+    const candidates: Array<string | Record<string, unknown>> = [
+      ...((options.candidate as string[]) ?? []),
+    ];
+    if (options.sourcesCsv) {
+      const rows = parseSourceList(
+        await fs.readFile(options.sourcesCsv, "utf-8"),
+        options.sourcesCsv,
+      );
+      for (const row of rows) {
+        candidates.push({ URL: row.URL, ...(row.discovery ?? {}) });
+      }
+    }
+
+    const providers = ((options.provider as string[]) ?? []).filter((p) => p) as NativeProvider[];
+    for (const p of providers) {
+      if (p !== "duckduckgo-html" && p !== "bing-rss") {
+        console.error(red(`Unknown provider '${p}'. Use duckduckgo-html or bing-rss.`));
+        process.exit(1);
+      }
+    }
+
+    const outDir = options.out ?? path.join("reports", "discovery");
+    const result = await discover(queries, outDir, {
+      target: options.target,
+      providers: providers.length > 0 ? providers : undefined,
+      hostRecords: options.hostResults
+        ? hostAttempts(JSON.parse(await fs.readFile(options.hostResults, "utf-8")))
+        : [],
+      candidates,
+      saved: options.savedSearch
+        ? (JSON.parse(await fs.readFile(options.savedSearch, "utf-8")) as SavedSearch[])
+        : [],
+      offline: !!options.offline,
+      maxRequests: parseInt(options.maxRequests, 10),
+      maxQueries: parseInt(options.maxQueries, 10),
+      maxCandidates: parseInt(options.maxCandidates, 10),
+      timeoutMs: Math.round(parseFloat(options.timeout) * 1000),
+      seconds: parseFloat(options.seconds),
+      cacheDir: options.cache,
+    });
+
+    await fs.writeFile(
+      path.join(outDir, "sources.csv"),
+      sourcesCsv(candidatesToRows(result.candidates)),
+    );
+    await fs.writeFile(path.join(outDir, "discovery.md"), discoveryMarkdown(result));
+
+    const db = await ensureStore();
+    const id = `disc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    repo.saveDiscoveryRun(db, result, id);
+
+    if (options.out) {
+      console.log(green(`✔ Discovery → ${outDir} (${result.candidate_count} candidates)`));
+    } else {
+      console.log(discoveryMarkdown(result));
+    }
+    console.log(
+      cyan(
+        `${result.candidate_count} unverified lead${result.candidate_count === 1 ? "" : "s"} from ${result.queries_processed} quer${result.queries_processed === 1 ? "y" : "ies"} — persisted as ${id}`,
+      ),
+    );
+    console.log(
+      gray(`Feed the leads to reputation: seoforge reputation -t ${options.target} -b "Brand" -s ${path.join(outDir, "sources.csv")}`),
+    );
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: search-plan — Google discovery navigation plan (no searching) */
+/* ------------------------------------------------------------------ */
+program
+  .command("search-plan")
+  .description("Plan bounded Google discovery navigation URLs; does not run searches")
+  .requiredOption("-t, --target <url>", "Your site URL")
+  .requiredOption("-b, --brand <name>", "Brand name to search for")
+  .option("--pages <n>", "Search pages to plan (1-20)", "5")
+  .option("--out <dir>", "Save the plan as markdown + json to this directory")
+  .action(async (options) => {
+    const pages = parseInt(options.pages, 10);
+    const outDir = options.out ?? path.join("reports", "search-plan");
+    const plan = await writeSearchPlan(options.target, options.brand, outDir, pages);
+    if (options.out) {
+      console.log(green(`✔ Search plan → ${outDir} (${plan.pages.length} pages)`));
+    } else {
+      console.log(searchPlanMarkdown(plan));
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: search-import — extract candidates from saved result HTML     */
+/* ------------------------------------------------------------------ */
+program
+  .command("search-import [files...]")
+  .description("Extract candidate links from saved public search result HTML pages")
+  .requiredOption("-t, --target <url>", "Your site URL")
+  .requiredOption("--query <text>", "The query these result pages were captured for")
+  .requiredOption("--captured-at <date>", "ISO date (2026-09-23) or timestamp when pages were captured")
+  .option("--engine <name>", "Engine declared by the operator", "Google")
+  .option("--out <dir>", "Save sources.csv + markdown to this directory")
+  .action(async (files: string[], options) => {
+    if (!files || files.length === 0) {
+      console.error(red("Supply 1-20 saved result-page HTML files as arguments."));
+      process.exit(1);
+    }
+    const outDir = options.out ?? path.join("reports", "search-import");
+    const result = await importSearchHtml(
+      files,
+      options.target,
+      options.query,
+      options.capturedAt,
+      outDir,
+      options.engine,
+    );
+    if (options.out) {
+      console.log(green(`✔ Search import → ${outDir} (${result.candidate_urls} candidates)`));
+    } else {
+      console.log(searchImportMarkdown(result));
+    }
+    console.log(
+      gray(`Imported ${result.candidate_urls} candidate URL${result.candidate_urls === 1 ? "" : "s"} from ${result.snapshots_imported} snapshot${result.snapshots_imported === 1 ? "" : "s"}. No live search was run.`),
+    );
+  });
 
 /* ------------------------------------------------------------------ */
 /* Command: compare — competitor gap analysis on crawl evidence         */

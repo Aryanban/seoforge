@@ -46,9 +46,13 @@ export function validateSchemaOrg(
     }
 
     const nodes: any[] = [];
+    let topLevelContext: string | undefined;
     if (Array.isArray(parsed)) {
       nodes.push(...parsed);
     } else if (parsed["@graph"] && Array.isArray(parsed["@graph"])) {
+      // A @graph carries one @context on the wrapper that applies to every
+      // nested node; inheriting it avoids flagging valid graphs as "undefined".
+      topLevelContext = typeof parsed["@context"] === "string" ? parsed["@context"] : undefined;
       nodes.push(...parsed["@graph"]);
     } else if (parsed["@type"]) {
       nodes.push(parsed);
@@ -60,7 +64,7 @@ export function validateSchemaOrg(
     rawGraphCount += nodes.length;
 
     for (const node of nodes) {
-      const ctx = node["@context"];
+      const ctx = node["@context"] ?? topLevelContext;
       if (!ctx || (typeof ctx === "string" && !ctx.includes("schema.org"))) {
         schemaOrgErrors.push(`Invalid @context: '${ctx}'. Expected 'https://schema.org'.`);
       }

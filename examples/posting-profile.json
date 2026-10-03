@@ -9,6 +9,6 @@
   "evidence_basis": "Illustrative profile. Replace with facts and URLs observed on the actual website before using the plan.",
   "pages": [
     { "url": "https://www.webforge.me/projects", "topic": "developer portfolio projects", "status": "existing" },
-    { "url": "https://dholeramap.com/", "topic": "Dholera GIS city map", "status": "existing" }
+    { "url": "https://plotbook.webforge.me/", "topic": "real estate intelligence platform", "status": "existing" }
   ]
 }

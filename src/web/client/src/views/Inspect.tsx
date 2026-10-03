@@ -46,7 +46,7 @@ export default function Inspect() {
             value={url}
             onChange={setUrl}
             onKeyDown={(e) => e.key === "Enter" && run()}
-            placeholder="https://dholeramap.com/some-page"
+            placeholder="https://www.webforge.me/some-page"
             className="flex-1 min-w-[260px]"
           />
           <Select value={policy} onChange={setPolicy}>

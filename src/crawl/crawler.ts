@@ -533,7 +533,11 @@ export class Crawler extends EventEmitter {
           nofollow: info.nofollow,
           isInternal: info.isInternal,
           targetStatus: res.status,
-          isBroken: res.status >= 400 || res.status === 0,
+          // status 0 means the HEAD probe itself failed (timeout, connection
+          // reset, or the target rate-limiting the crawler) — not a confirmed
+          // dead link. Only a real HTTP >=400 response counts as broken;
+          // otherwise big hosts get mass false positives under load.
+          isBroken: res.status >= 400,
           isRedirect: res.redirected || (res.status >= 300 && res.status < 400),
           redirectChain: res.redirectChain,
         });

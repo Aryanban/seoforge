@@ -23,9 +23,10 @@ seoforge/
 ├── src/publishing/         # 206-source publishing catalog + tailored posting-plan builder (ported from BeyondSEO)
 ├── src/reputation/         # source verifier + reputation model 1.1 scorer (ported from BeyondSEO)
 ├── src/competitors/        # crawl-based competitor gap matrix
+├── src/discovery/          # bounded search leads (unverified) → feeds reputation
 ├── src/store/              # SQLite persistence (native node:sqlite) + repository queries
 ├── src/api/server.ts       # local REST API + SSE (hono) — also serves the built dashboard
-├── src/mcp/mcp-server.ts   # the MCP server you connect to (17 tools)
+├── src/mcp/mcp-server.ts   # the MCP server you connect to (18 tools)
 ├── src/report/             # markdown / CSV / HTML / terminal report writers
 ├── src/web/client/         # React + Tailwind dashboard (built by Vite into dist/web)
 ├── docs/implementation-plan/  # full design specs (read these if you need depth)
@@ -80,6 +81,9 @@ the page — it never crashes the crawl.
 | `serve` | Local dashboard + REST API on `http://127.0.0.1:5173` (`--port --host --no-open`) |
 | `export <md\|csv\|html\|backlog>` | Export the latest crawl (or `--crawl <id>`); CSV `--kind pages\|issues\|links\|recommendations` |
 | `publish [query]` | Browse the 206-source catalog (`--category --kind --status`), or build a plan from `--profile` JSON (`--limit --out`) |
+| `discover` | Collect **unverified** leads: `-q --query` (repeatable), `--provider duckduckgo-html\|bing-rss`, `--saved-search`, `--host-results`, `--candidate`, `--sources-csv`, `--offline`, `--max-requests --max-queries --max-candidates --seconds` |
+| `search-plan` | Plan Google discovery navigation URLs for manual capture (never searches). `--target --brand --pages` |
+| `search-import [files...]` | Extract candidates from saved result-page HTML. `--target --query --captured-at --engine` |
 | `reputation` | Verify candidate sources + model 1.1 score. `--target --brand --sources --alias --related-host --limit --search-pages --render --out` |
 | `compare` | Competitor gap matrix. `--crawl --competitors` (stored) or `--target --competitor-urls` (live, `--limit`) |
 | `audit` | v1-compatible multi-domain audit (`--sample N` sitemap sampling) |
@@ -95,6 +99,8 @@ the page — it never crashes the crawl.
 - `export backlog --all-urls` re-renders the AI fix report with **every affected URL**
   listed (the default report caps at 20 URLs per issue). This is the file you want when
   actually fixing things.
+- `discover --offline` collects leads with **zero network** (supplied/imported evidence
+  only). Its `sources.csv` drops straight into `reputation --sources`.
 
 ---
 
@@ -146,7 +152,7 @@ command = "node"
 args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 ```
 
-### The 17 MCP tools
+### The 18 MCP tools
 
 | Tool | Purpose |
 | --- | --- |
@@ -165,6 +171,7 @@ args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 | `seoforge_generate_aeo_snippet` | Inverted-pyramid answer paragraph + FAQ JSON-LD |
 | `seoforge_publishing_plan` | Tailored posting plan from the 206-source catalog (or catalog browse). Deterministic, no network. |
 | `seoforge_reputation_report` | Verify candidate source URLs + model-1.1 reputation score (conservative: low-confidence cap 49/100) |
+| `seoforge_discover_sources` | Collect unverified leads from bounded search / saved HTML / supplied URLs → feeds `seoforge_reputation_report` |
 | `seoforge_compare_competitors` | Competitor gap matrix from stored crawls or live URLs |
 | `seoforge_daily_run` | Full daily routine: audit + report + IndexNow |
 
@@ -206,6 +213,8 @@ then:
 | `GET /api/publish/plans[/:id]` | list / fetch saved plans |
 | `POST /api/reputation` | verify source URLs + model-1.1 score |
 | `GET /api/reputation[/:id]` | list / fetch assessments |
+| `POST /api/discover` | collect unverified search leads (`offline` for zero network) |
+| `GET /api/discover` / `/api/discover/:id` | list / fetch discovery runs |
 | `POST /api/competitors/compare` | competitor gap matrix (stored crawls or live URLs) |
 | `GET /api/competitors[/:id]` | list / fetch comparisons |
 | `POST /api/inspect` | single-page inspection |
@@ -219,7 +228,7 @@ then:
 | --- | --- |
 | `reports/crawl-<date>.md` | Full audit report: issue overview table + per-page metrics |
 | `reports/ai-fix-backlog-<date>.md` | Prioritized AI fixes (why-it-matters / steps / before-after), 20 URLs per issue |
-| `reports/dholeramap-full-ai-report.md` | Same backlog with **every affected URL** (`export backlog --all-urls`) — **the handoff file** |
+| `reports/<target>-full-ai-report.md` | Same backlog with **every affected URL** (`export backlog --all-urls`) — **the handoff file** |
 | `reports/crawl-issues-<date>.csv` | One row per (issue × page URL) — for bulk/spreadsheet work |
 | `reports/seoforge.db` | the SQLite store — query directly with `node:sqlite` if needed |
 
@@ -231,16 +240,19 @@ target, so `📈 +N` means newly introduced and `📉 -N` means resolved.
 
 ## 7. Current state of this project
 
-Crawled `https://dholeramap.com` at budget 1000 / depth 10: **1000 pages**, robots ✓,
-sitemap ✓ (282 URLs), llms.txt ✓, **AEO 100/100**, health **0 Errors / 1988 Warnings /
-2968 Notices**. The full, every-URL fix report is:
+Configured audit targets in `seoforge.config.json`: **Webforge Portfolio**
+(`https://www.webforge.me/`) and **PlotBook Real Estate Intelligence**
+(`https://plotbook.webforge.me/`). The scheduled GitHub Actions autopilot is **disabled** —
+nothing crawls on a schedule; run audits manually instead:
 
-```
-/Users/aryanbansal/Documents/seoforge/reports/dholeramap-full-ai-report.md
-/Users/aryanbansal/Documents/seoforge/reports/dholeramap-issues.csv
+```bash
+npx tsx src/cli.ts crawl https://www.webforge.me --limit 200 --save
+node dist/cli.js export backlog --all-urls     # → reports/<target>-full-ai-report.md
 ```
 
-Top items (the two **High** ones are almost certainly a single template fix):
+When one issue flags hundreds of pages, the root cause is nearly always a shared
+layout/component — fix it once at the template level, then re-crawl to confirm the delta
+drops. The prioritized fix backlog groups issues like this (illustrative example):
 
 | Issue | Severity | Pages |
 | --- | --- | --- |
@@ -253,11 +265,29 @@ Top items (the two **High** ones are almost certainly a single template fix):
 
 ---
 
-## 8. Ported BeyondSEO modules (`publishing`, `reputation`, `competitors`)
+## 8. Ported BeyondSEO modules (`publishing`, `reputation`, `competitors`, `discovery`)
 
-Three modules were ported from [BeyondSEO](https://github.com/beyondtahir/beyondseo)
+Four modules were ported from [BeyondSEO](https://github.com/beyondtahir/beyondseo)
 (MIT, Muhammad Tahir Ashraf) into native TypeScript — see `THIRD_PARTY_NOTICES.md`
 for exact provenance. They keep SEOForge's deterministic, no-API-key contract.
+
+**`src/discovery/` — bounded search leads.** `discover` collects candidate URLs for
+`reputation` without a paid index. Sources are tried in strict precedence per query:
+host-recorded results first (your own search tool, never impersonated), then native
+providers (`duckduckgo-html`, `bing-rss`) in order. Native attempts have **zero retries**
+— a failure advances to the next provider — and share one request + wall-clock budget that
+also covers robots. robots.txt is honoured per provider origin; when the policy cannot be
+retrieved the request is **withheld, not sent**. `--offline` runs on supplied/imported
+evidence only (zero network). Own-site, subdomain and search-provider hosts are filtered
+out of the leads, and every survivor is recorded as `unverified_lead`:
+
+- A search result is a lead, never a confirmed backlink or mention. `sources.csv` is the
+  handoff file — it drops straight into `reputation --sources`.
+- `search-plan` emits Google *navigation* URLs only and `search-import` extracts links
+  from pages you already saved; neither claims to have run a live search.
+- A failed/withheld provider is not a failed audit: supply URLs or import saved pages
+  instead. Attempt status codes (`robots_restricted`, `provider_challenge`,
+  `provider_rate_limited`, …) record the *observed evidence*, not a blamed cause.
 
 **`src/publishing/` — 206-source catalog + posting plans.** Feed `publish --profile`
 a business profile (example at `examples/posting-profile.json`) for a capacity-dated
@@ -281,9 +311,10 @@ crawls on measured evidence (AEO, issue counts, depth, schema coverage, internal
 It discloses crawl-budget parity — an uneven sample is a sampling artifact, not a
 performance gap. **Not a ranking or traffic estimate.**
 
-All three persist to SQLite (`publishing_plans`, `reputation_assessments` +
-`reputation_sources`, `competitor_comparisons`) and are reachable from CLI, the three new
-MCP tools, the REST API, and dashboard views (Publishing / Reputation / Competitors).
+All four persist to SQLite (`publishing_plans`, `reputation_assessments` +
+`reputation_sources`, `competitor_comparisons`, `discovery_runs`) and are reachable from
+CLI, the four new MCP tools, the REST API, and dashboard views (Publishing / Reputation /
+Competitors).
 
 ---
 
@@ -312,7 +343,7 @@ MCP tools, the REST API, and dashboard views (Publishing / Reputation / Competit
 npm run typecheck         # engine types
 npm run typecheck:web     # dashboard types
 npm run lint              # eslint flat config (typescript-eslint)
-npm test                  # vitest — 96 tests incl. fixture-site crawl
+npm test                  # vitest — 135 tests incl. fixture-site crawl
 npm run build             # tsc -> dist/ + vite -> dist/web/
 ```
 
