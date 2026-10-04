@@ -184,6 +184,32 @@ export interface InspectResult {
     first100Words: string;
   };
   generatedSchemas?: Record<string, object>;
+  keywordIntelligence?: {
+    keyword: string;
+    intent: {
+      primaryIntent: string;
+      secondaryIntent?: string;
+      confidence: number;
+      intentLabel: string;
+      explanation: string;
+    };
+    difficulty: {
+      score: number;
+      tier: string;
+      estimatedRefDomainsNeeded: number;
+      competitiveFactors: string[];
+    };
+    variations: {
+      questions: Array<{ keyword: string; intent: string; difficulty: number }>;
+      commercial: Array<{ keyword: string; intent: string; difficulty: number }>;
+      longTail: Array<{ keyword: string; intent: string; difficulty: number }>;
+    };
+    alignment?: {
+      aligned: boolean;
+      score: number;
+      recommendations: string[];
+    };
+  };
 }
 
 export function severityClass(sev: string): string {

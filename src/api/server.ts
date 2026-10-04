@@ -57,6 +57,14 @@ import {
   generateRecommendedSchemas,
   formatSchemaScript,
 } from "../schema-generator.js";
+import { findInternalLinkOpportunities } from "../link-opportunities.js";
+import { analyzeAnchorProfile } from "../anchor-analyzer.js";
+import {
+  classifySearchIntent,
+  estimateKeywordDifficulty,
+  generateKeywordVariations,
+  auditSearchIntentAlignment,
+} from "../keyword-intelligence.js";
 
 interface RunningJob {
   crawler: Crawler;
@@ -332,6 +340,27 @@ export function createServer(options: ServerOptions = {}): Hono {
     );
   });
 
+  app.get("/api/crawl/:id/link-opportunities", (c) => {
+    const crawlId = c.req.param("id");
+    const full = completed.get(crawlId) || jobs.get(crawlId)?.result || repo.getFullCrawl(db, crawlId);
+    if (!full) return c.json({ error: "Crawl not found" }, 404);
+    const pages = full.pages || [];
+    const links = full.links || [];
+    const minScore = c.req.query("minScore") ? parseInt(c.req.query("minScore")!, 10) : 20;
+    const opportunities = findInternalLinkOpportunities(pages, links, { minScore });
+    return c.json({ total: opportunities.length, opportunities });
+  });
+
+  app.get("/api/crawl/:id/anchor-profile", (c) => {
+    const crawlId = c.req.param("id");
+    const full = completed.get(crawlId) || jobs.get(crawlId)?.result || repo.getFullCrawl(db, crawlId);
+    if (!full) return c.json({ error: "Crawl not found" }, 404);
+    const links = full.links || [];
+    const brandName = c.req.query("brandName") || full.domainName || full.project;
+    const report = analyzeAnchorProfile(links, { brandName });
+    return c.json(report);
+  });
+
   app.get("/api/crawl/:id/recommendations", (c) => {
     return c.json(repo.getRecommendations(db, c.req.param("id")));
   });
@@ -449,6 +478,35 @@ export function createServer(options: ServerOptions = {}): Hono {
       return c.json({
         schema,
         scriptTag: formatSchemaScript(schema),
+      });
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/tools/keyword-intelligence", async (c) => {
+    try {
+      const body = (await c.req.json().catch(() => ({}))) as {
+        keyword?: string;
+        pageContext?: any;
+      };
+      if (!body.keyword || !body.keyword.trim()) {
+        return c.json({ error: "keyword field is required" }, 400);
+      }
+      const kw = body.keyword.trim();
+      const intent = classifySearchIntent(kw);
+      const difficulty = estimateKeywordDifficulty(kw);
+      const variations = generateKeywordVariations(kw);
+      const alignment = body.pageContext
+        ? auditSearchIntentAlignment(kw, body.pageContext)
+        : undefined;
+
+      return c.json({
+        keyword: kw,
+        intent,
+        difficulty,
+        variations,
+        alignment,
       });
     } catch (err: any) {
       return c.json({ error: err.message }, 500);

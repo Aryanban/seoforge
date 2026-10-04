@@ -58,6 +58,14 @@ import {
   generateBreadcrumbSchema,
   formatSchemaScript,
 } from "../schema-generator.js";
+import { findInternalLinkOpportunities } from "../link-opportunities.js";
+import { analyzeAnchorProfile } from "../anchor-analyzer.js";
+import {
+  classifySearchIntent,
+  estimateKeywordDifficulty,
+  generateKeywordVariations,
+  auditSearchIntentAlignment,
+} from "../keyword-intelligence.js";
 
 interface AsyncJob {
   crawlId: string;
@@ -418,6 +426,46 @@ export function createMcpServer(): Server {
           required: ["type", "data"],
         },
       },
+      {
+        name: "seoforge_link_opportunities",
+        description:
+          "Discover high-value internal link opportunities across the crawled site (Ahrefs Site Audit rival) by locating unlinked mentions of target keywords.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID to analyze (defaults to latest crawl if omitted)" },
+            min_score: { type: "number", description: "Minimum opportunity score threshold (default 20)" },
+          },
+        },
+      },
+      {
+        name: "seoforge_keyword_intelligence",
+        description:
+          "Classify search intent (Informational, Commercial, Transactional, Navigational), estimate Keyword Difficulty (KD 0-100), and generate question clusters and long-tail variants (Ahrefs Keywords Explorer rival).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            keyword: { type: "string", description: "Target keyword to analyze" },
+            page_context: {
+              type: "object",
+              description: "Optional page context to audit search intent alignment (title, wordCount, hasComparisonTable, hasFaq)",
+            },
+          },
+          required: ["keyword"],
+        },
+      },
+      {
+        name: "seoforge_anchor_profile",
+        description:
+          "Analyze anchor text profile, exact match vs branded distribution, generic anchor dilution, and Google Penguin over-optimization penalty risk (Ahrefs Site Explorer rival).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID to analyze (defaults to latest crawl if omitted)" },
+            brand_name: { type: "string", description: "Optional brand name to classify branded vs non-branded anchors" },
+          },
+        },
+      },
     ],
   }));
 
@@ -745,6 +793,64 @@ export function createMcpServer(): Server {
         return ok({
           schema,
           scriptTag: formatSchemaScript(schema),
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_link_opportunities") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        let crawlId = args?.crawl_id as string | undefined;
+        if (!crawlId) {
+          const latest = repo.listCrawls(db, 1)[0];
+          if (latest) crawlId = latest.id;
+        }
+        if (!crawlId) return err("No crawl found; pass crawl_id or run seoforge_crawl first.");
+        const full = await loadFullResult(crawlId);
+        if (!full) return err(`Crawl '${crawlId}' not found.`);
+        const minScore = numArg(args?.min_score) ?? 20;
+        const opportunities = findInternalLinkOpportunities(full.pages, full.links, { minScore });
+        return ok({
+          crawlId,
+          total: opportunities.length,
+          opportunities,
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_keyword_intelligence") {
+        const kw = ((args?.keyword as string) || "").trim();
+        if (!kw) return err("keyword is required.");
+        const intent = classifySearchIntent(kw);
+        const difficulty = estimateKeywordDifficulty(kw);
+        const variations = generateKeywordVariations(kw);
+        const alignment = args?.page_context
+          ? auditSearchIntentAlignment(kw, args.page_context as any)
+          : undefined;
+        return ok({
+          keyword: kw,
+          intent,
+          difficulty,
+          variations,
+          alignment,
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_anchor_profile") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        let crawlId = args?.crawl_id as string | undefined;
+        if (!crawlId) {
+          const latest = repo.listCrawls(db, 1)[0];
+          if (latest) crawlId = latest.id;
+        }
+        if (!crawlId) return err("No crawl found; pass crawl_id or run seoforge_crawl first.");
+        const full = await loadFullResult(crawlId);
+        if (!full) return err(`Crawl '${crawlId}' not found.`);
+        const brandName = (args?.brand_name as string) || full.domainName || full.project;
+        const report = analyzeAnchorProfile(full.links, { brandName });
+        return ok({
+          crawlId,
+          report,
         });
       }
 

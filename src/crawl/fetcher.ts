@@ -50,6 +50,7 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
         "User-Agent": userAgent,
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
       },
     });
     ttfb = Date.now() - start;

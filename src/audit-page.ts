@@ -10,6 +10,16 @@ import { normalizeUrl } from "./crawl/queue.js";
 import { runPageChecks, Thresholds } from "./checks/registry.js";
 import { analyzeContent, ContentAnalysisResult } from "./content-analyzer.js";
 import { generateRecommendedSchemas } from "./schema-generator.js";
+import {
+  classifySearchIntent,
+  estimateKeywordDifficulty,
+  generateKeywordVariations,
+  auditSearchIntentAlignment,
+  type SearchIntentResult,
+  type KeywordDifficultyResult,
+  type KeywordVariationsResult,
+  type IntentAlignmentCheck,
+} from "./keyword-intelligence.js";
 
 export interface SinglePageOptions {
   expectedEntities?: string[];
@@ -25,6 +35,13 @@ export interface SinglePageResult {
   issues: AuditIssue[];
   contentAnalysis?: ContentAnalysisResult;
   generatedSchemas?: Record<string, object>;
+  keywordIntelligence?: {
+    keyword: string;
+    intent: SearchIntentResult;
+    difficulty: KeywordDifficultyResult;
+    variations: KeywordVariationsResult;
+    alignment?: IntentAlignmentCheck;
+  };
 }
 
 export async function auditSinglePage(url: string, options: SinglePageOptions = {}): Promise<SinglePageResult> {
@@ -104,6 +121,7 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
 
   let contentAnalysis: ContentAnalysisResult | undefined;
   let generatedSchemas: Record<string, object> | undefined;
+  let keywordIntelligence: SinglePageResult["keywordIntelligence"] | undefined;
 
   if (html) {
     try {
@@ -112,12 +130,41 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
         targetKeyword: options.targetKeyword,
       });
       generatedSchemas = generateRecommendedSchemas(finalUrl, html);
+
+      const targetKw =
+        options.targetKeyword ||
+        contentAnalysis.targetKeywordAudit?.keyword ||
+        contentAnalysis.keywords.bigrams[0]?.phrase ||
+        contentAnalysis.keywords.unigrams[0]?.phrase ||
+        page.h1Text?.slice(0, 40);
+
+      if (targetKw && targetKw.trim().length >= 3) {
+        const kw = targetKw.trim();
+        const intent = classifySearchIntent(kw);
+        const difficulty = estimateKeywordDifficulty(kw);
+        const variations = generateKeywordVariations(kw);
+        const alignment = auditSearchIntentAlignment(kw, {
+          title: page.title,
+          wordCount: page.wordCount,
+          hasComparisonTable: html.includes("<table") || html.includes("comparison") || html.includes("vs"),
+          hasFaq: html.includes("FAQ") || html.includes("Frequently Asked") || (page.schema as any)?.types?.includes("FAQPage"),
+          hasPricingSignals: html.includes("$") || html.includes("pricing") || html.includes("plan"),
+        });
+
+        keywordIntelligence = {
+          keyword: kw,
+          intent,
+          difficulty,
+          variations,
+          alignment,
+        };
+      }
     } catch {
       // Non-fatal enhancement
     }
   }
 
-  return { page, issues, contentAnalysis, generatedSchemas };
+  return { page, issues, contentAnalysis, generatedSchemas, keywordIntelligence };
 }
 
 export { normalizeUrl };

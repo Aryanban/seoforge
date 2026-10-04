@@ -589,6 +589,105 @@ function ContentTab({ result }: { result: InspectResult }) {
         </Card>
       )}
 
+      {/* Ahrefs-Grade Search Intent & Keyword Difficulty (KD) Explorer */}
+      {result.keywordIntelligence && (
+        <Card className="p-5 space-y-4 border-indigo-500/30">
+          <div className="flex items-center justify-between pb-2 border-b border-border flex-wrap gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-indigo-400 font-semibold">
+                  Ahrefs Keywords Explorer Rival
+                </span>
+              </div>
+              <h2 className="text-sm font-semibold">
+                Search Intent & Difficulty: <span className="text-indigo-400">&ldquo;{result.keywordIntelligence.keyword}&rdquo;</span>
+              </h2>
+            </div>
+
+            <Badge
+              className={
+                result.keywordIntelligence.intent.primaryIntent === "commercial"
+                  ? "bg-amber-500/15 text-amber-300 border border-amber-500/30"
+                  : result.keywordIntelligence.intent.primaryIntent === "transactional"
+                  ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"
+                  : "bg-indigo-500/15 text-indigo-300 border border-indigo-500/30"
+              }
+            >
+              {result.keywordIntelligence.intent.intentLabel}
+            </Badge>
+          </div>
+
+          {/* Intent & KD Metric Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div className="p-3.5 bg-panel2 border border-border rounded-lg space-y-1">
+              <div className="text-[10px] text-faint uppercase tracking-wide">Keyword Difficulty (KD)</div>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span
+                  className={`text-2xl font-bold ${
+                    result.keywordIntelligence.difficulty.score <= 30
+                      ? "text-emerald-400"
+                      : result.keywordIntelligence.difficulty.score <= 60
+                      ? "text-amber-400"
+                      : "text-red-400"
+                  }`}
+                >
+                  {result.keywordIntelligence.difficulty.score}
+                </span>
+                <span className="text-xs text-muted">/ 100 ({result.keywordIntelligence.difficulty.tier})</span>
+              </div>
+              <div className="text-[11px] text-muted">
+                Need ~{result.keywordIntelligence.difficulty.estimatedRefDomainsNeeded} referring domains to rank in Top 10
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-panel2 border border-border rounded-lg space-y-1">
+              <div className="text-[10px] text-faint uppercase tracking-wide">Intent Explanation</div>
+              <div className="text-xs text-zinc-200 leading-snug mt-1">
+                {result.keywordIntelligence.intent.explanation}
+              </div>
+              <div className="text-[10px] text-indigo-400 font-mono mt-1">
+                {result.keywordIntelligence.intent.confidence}% confidence
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-panel2 border border-border rounded-lg space-y-1">
+              <div className="text-[10px] text-faint uppercase tracking-wide">Content Intent Alignment</div>
+              <div className="flex items-center gap-1.5 mt-1 font-semibold text-xs">
+                {result.keywordIntelligence.alignment?.aligned ? (
+                  <span className="text-emerald-400">✓ Page Content Aligned</span>
+                ) : (
+                  <span className="text-amber-400">⚠️ Intent Format Mismatch</span>
+                )}
+              </div>
+              <div className="text-[11px] text-muted">
+                {result.keywordIntelligence.alignment?.recommendations[0] || "Page structure matches search intent expectations."}
+              </div>
+            </div>
+          </div>
+
+          {/* Question Clusters & Long-Tail Variations */}
+          <div className="space-y-2 pt-2 border-t border-border">
+            <div className="text-xs font-semibold text-zinc-300">
+              Questions & Long-Tail Variants to Target (Ahrefs Keyword Ideas):
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              {result.keywordIntelligence.variations.questions.slice(0, 3).map((q, qIdx) => (
+                <div key={qIdx} className="p-2.5 bg-panel2/60 border border-border/80 rounded-lg flex items-center justify-between">
+                  <span className="text-zinc-200">{q.keyword}</span>
+                  <span className="text-[10px] font-mono text-zinc-400">KD {q.difficulty}</span>
+                </div>
+              ))}
+              {result.keywordIntelligence.variations.commercial.slice(0, 3).map((c, cIdx) => (
+                <div key={cIdx} className="p-2.5 bg-panel2/60 border border-border/80 rounded-lg flex items-center justify-between">
+                  <span className="text-zinc-200">{c.keyword}</span>
+                  <span className="text-[10px] font-mono text-zinc-400">KD {c.difficulty}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* N-Gram Keyword Table */}
       <Card className="p-5 space-y-3">
         <div className="flex items-center justify-between pb-2 border-b border-border">

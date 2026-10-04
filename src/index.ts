@@ -44,6 +44,11 @@ export { toCsv } from "./report/csv.js";
 export { generateHtmlReport } from "./report/html.js";
 export { createServer, startServer } from "./api/server.js";
 export { createMcpServer, startMcpServer } from "./mcp/mcp-server.js";
+export * from "./content-analyzer.js";
+export * from "./schema-generator.js";
+export * from "./link-opportunities.js";
+export * from "./keyword-intelligence.js";
+export * from "./anchor-analyzer.js";
 
 // v1 backwards compatibility
 export { crawlDomain, crawlPage } from "./crawler.js";
