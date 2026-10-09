@@ -16,6 +16,12 @@
       "expectedEntities": ["Person", "WebSite", "SoftwareApplication"],
       "paths": [
         "/",
+        "/services",
+        "/contact",
+        "/blog",
+        "/blog/ship-software-faster",
+        "/blog/website-cost-delhi",
+        "/blog/build-website-that-ranks-on-google",
         "/projects",
         "/skills",
         "/terminal",
