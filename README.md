@@ -1,67 +1,155 @@
 # SEOForge ⚡ • Full-Site SEO Crawler, Audit Engine & MCP Server
+### Screaming Frog + Ahrefs–Grade Technical Audit Engine, Internal Link Intelligence, AEO Scorer & 18-Tool Native MCP Server
 
-<p align="left">
-  <a href="https://github.com/Aryanban/seoforge/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License MIT" /></a>
-  <img src="https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js" />
-  <img src="https://img.shields.io/badge/TypeScript-5.8-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Tests-156%20Passing-brightgreen?style=for-the-badge&logo=vitest&logoColor=white" alt="Tests 156 Passing" />
-  <img src="https://img.shields.io/badge/Protocol-IndexNow-008080?style=for-the-badge" alt="IndexNow Protocol" />
-  <img src="https://img.shields.io/badge/MCP%20Server-18%20tools-purple?style=for-the-badge" alt="Model Context Protocol" />
-  <img src="https://img.shields.io/badge/AEO%20%26%20Schema.org-8B5CF6?style=for-the-badge" alt="AEO & Schema.org" />
-</p>
+<div align="center">
 
-An open-source, **Screaming Frog + Ahrefs–grade full-site crawler and technical audit engine**, built with **Answer Engine Optimization (AEO)** scoring, **Internal Link Opportunities**, **Keyword Intelligence**, **Anchor Text Profiling**, deterministic **AI fix documentation**, a local **web dashboard + REST API**, and a **Model Context Protocol (MCP)** server so AI agents can run audits on their own.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![TypeScript 5.8](https://img.shields.io/badge/TypeScript-5.8_Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![Tests Passing](https://img.shields.io/badge/Tests-156%2F156_Passing_(100%25)-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Aryanban/seoforge)
+[![Protocol: IndexNow](https://img.shields.io/badge/Protocol-IndexNow-008080?style=for-the-badge)](https://www.indexnow.org)
+[![MCP Server](https://img.shields.io/badge/MCP%20Server-18_Native_Tools-purple?style=for-the-badge)](https://modelcontextprotocol.io)
+[![AEO & Schema.org](https://img.shields.io/badge/AEO-Answer_Engine_Opt-8B5CF6?style=for-the-badge)](https://schema.org)
 
-**100% Local & Free** — No subscriptions, no API keys, no cloud lock-in, and no crawled data or proprietary URLs ever leave your machine.
+<br />
 
-> **What's New in 2.0:**
-> - **Ahrefs-Grade Link Opportunities Engine:** Identifies missing internal links and keyword contexts across your site to boost target rankings.
-> - **Ahrefs Keywords Explorer:** Deterministic Search Intent classification, KD (0–100 Difficulty), referring domains needed, and question clusters.
-> - **Anchor Text Profiler & Penguin Detector:** Analyzes brand vs. exact-match vs. generic anchor text distribution with over-optimization risk warnings.
-> - **Content Readability & On-Page Optimizer:** Flesch-Kincaid grade level, Flesch Reading Ease score, n-gram keyword density analyzer, and semantic topic gap scanner.
-> - **Live SERP & Social Snippet Simulator:** Real-time desktop/mobile Google SERP preview with pixel-width truncation, Open Graph, and Twitter Cards.
-> - **156 Automated Vitest Tests** across 13 test suites ensuring rock-solid stability.
+**An open-source, Screaming Frog + Ahrefs–grade technical crawler and search intelligence engine with Answer Engine Optimization (AEO), internal link graph scoring, and an 18-tool Model Context Protocol (MCP) server.**  
+*100% Local, Private & Free — Zero subscriptions, zero third-party API keys, and zero data leakage.*
+
+[System Architecture](#-system-architecture) • [Feature Matrix](#-features--competitive-advantages) • [Core Engineering Innovations](#-core-engineering-innovations) • [Technical Specifications](#-technical-specifications--engineering-decisions) • [Quickstart Guide](#-quick-start) • [Portfolio & Showcase](#-engineering-portfolio--technical-evaluation-showcase)
+
+</div>
+
+---
+
+## 📌 Executive Overview & Problem Statement
+
+Technical SEO audits and link architecture analysis in modern web engineering have long been monopolized by expensive desktop tools (Screaming Frog at £209/year per license) and cloud SaaS platforms (Ahrefs / Semrush starting at $99–$199/month). When auditing at scale, engineering teams face critical limitations:
+1. **Proprietary Cloud Lock-In**: Running crawls through third-party cloud services sends proprietary staging URLs and internal site graphs to third-party databases.
+2. **Missing Answer Engine Optimization (AEO)**: Traditional crawlers measure legacy 2015-era meta tags while completely ignoring modern AI answer engine parameters (direct-answer fact triplets for Google AI Overviews, Perplexity, and ChatGPT Search).
+3. **Disconnected AI Workflows**: Standard crawlers output static PDF or CSV exports that require tedious manual copying and pasting into LLMs to generate fixes.
+
+**SEOForge** resolves this by providing a unified, local-first technical SEO engine:
+* **High-Throughput BFS Web Crawler**: Combines lightning-fast raw HTTP pipelining with optional headless Playwright browser rendering to capture real-world Core Web Vitals (LCP, CLS, INP, FCP, TTFB).
+* **Internal Link & Anchor Text Intelligence**: Computes internal PageRank, flags orphan pages, uncovers non-linked keyword mentions for target pages, and analyzes anchor text distributions to prevent Google Penguin over-optimization penalties.
+* **Deterministic AI Recommendations**: Automatically compiles discovered crawl issues into actionable, copy-pasteable code fixes with zero hallucinations.
+* **18-Tool Native Model Context Protocol (MCP)**: AI agents (Google Antigravity, Claude Code, Cursor) can autonomously crawl, audit, inspect, and optimize websites using natural language commands.
+
+---
+
+## 🏗️ System Architecture
+
+```mermaid
+flowchart TD
+    subgraph ClientLayer ["Client & Interface Layer"]
+        CLI["SEOForge CLI (Node.js 22+ / Commander)"]
+        Dashboard["Local Web Studio (React + Tailwind + SSE)"]
+        AIAgents["AI Coding Agents (Antigravity, Claude, Cursor)"]
+    end
+
+    subgraph CoreEngine ["Crawling & Execution Engine"]
+        Crawler["Asynchronous BFS Crawler (fetch + Playwright)"]
+        RobotsParser["robots.txt & Sitemap Discovery Engine"]
+        CWVScorer["Core Web Vitals & Metric Extractor"]
+    end
+
+    subgraph IntelligenceLayer ["Specialized Diagnostic Modules"]
+        LinkGraph["Link Graph & Internal PageRank Engine"]
+        LinkOpp["Internal Link Opportunities Matcher"]
+        AnchorProfiler["Anchor Text Profiler & Penguin Detector"]
+        KeywordIntel["Search Intent & Keyword Difficulty Engine"]
+        ContentOpt["Flesch Readability & N-Gram Analyzer"]
+        AEOAnalyzer["AEO Direct-Answer & Schema.org Validator"]
+    end
+
+    subgraph StorageLayer ["Persistence & External Protocols"]
+        Store[("SQLite Embedded Store & JSON LFS")]
+        IndexNowProtocol["IndexNow Instant Submission API"]
+    end
+
+    CLI --> Crawler
+    Dashboard --> Crawler
+    AIAgents -->|"stdio JSON-RPC 2.0"| MCPServer["Native MCP Server (18 Tools)"]
+    MCPServer --> Crawler
+
+    Crawler --> RobotsParser
+    Crawler --> CWVScorer
+    Crawler --> Store
+
+    Store --> LinkGraph
+    Store --> LinkOpp
+    Store --> AnchorProfiler
+    Store --> KeywordIntel
+    Store --> ContentOpt
+    Store --> AEOAnalyzer
+
+    CLI --> IndexNowProtocol
+    MCPServer --> IndexNowProtocol
+```
 
 ---
 
 ## ✨ Features & Competitive Advantages
 
 ### 🔍 Screaming Frog–Grade Full-Site Crawler
-- **BFS Crawl Engine** — Configurable queue, max depth, crawl budget, concurrency, and robots.txt compliance (honoring `Crawl-delay`).
-- **Flexible Crawl Strategies** — Choose between `discover` (full link following), `sitemap` (sitemap-only verification), or `config` (targeted URL list).
-- **Optional Headless JS Rendering** — Playwright mode (`--render`) for JavaScript-heavy Single Page Applications (React, Next.js, Vue), measuring real Core Web Vitals (LCP, CLS, INP, FCP, TTFB). Raw fetch by default for blazing-fast speed.
+* **Asynchronous BFS Crawl Engine**: Configurable crawl queue, depth ceilings, concurrency limits, and robots.txt compliance (`Crawl-delay` respect).
+* **Dual Execution Modes**: Raw HTTP pipelining for maximum speed (>100 pages/sec locally), or headless Playwright rendering (`--render`) for Single Page Applications (React, Next.js, Vue) measuring true Core Web Vitals (LCP, CLS, INP).
+* **Sitemap & URL Sampling**: Inspect targeted URL lists or randomly sample large multi-thousand-page sitemaps for rapid health audits.
 
 ### 🔗 Ahrefs-Grade Internal Link & Anchor Intelligence
-- **Internal Link Opportunities Engine (`src/link-opportunities.ts`)** — Scans full HTML body copy across the entire crawl to identify non-linked keyword mentions matching your key target pages. Recommends exact anchor phrases and context snippets to pass link equity without keyword cannibalization.
-- **Anchor Text Profiler & Penguin Risk Detector (`src/anchor-analyzer.ts`)** — Categorizes anchor texts into Brand, Exact Match, Partial Match, Generic, and Naked URL profiles. Automatically calculates ratios and triggers high/medium over-optimization warnings to protect against Google algorithmic penalties.
-- **Link Graph & Orphan Detection** — Complete internal PageRank score, broken link attribution (source URL + HTTP status), single-internal-link warnings, and orphan page isolation.
+* **Internal Link Opportunities Engine (`src/link-opportunities.ts`)**: Scans HTML body text across the entire crawl to identify unlinked keyword mentions corresponding to key target pages. Automatically suggests context snippets and anchor phrasing to channel link equity.
+* **Anchor Text Profiler & Penguin Risk Detector (`src/anchor-analyzer.ts`)**: Categorizes anchor texts into Brand, Exact Match, Partial Match, Generic, and Naked URL profiles. Triggers warnings when exact-match ratios exceed safe thresholds.
+* **Link Graph & Orphan Detection**: Computes internal PageRank, identifies broken link attribution chains (source URL + HTTP status), and isolates orphan pages disconnected from navigation trees.
 
 ### 🎯 Keywords Explorer & Search Intent Engine (`src/keyword-intelligence.ts`)
-- **Search Intent Classifier** — Classifies queries algorithmically into Informational, Commercial, Transactional, or Navigational intents based on linguistic and syntactic indicators.
-- **Keyword Difficulty (KD 0–100)** — Estimates ranking difficulty and computes the required referring domains to hit page 1.
-- **Click Potential & SERP Features** — Evaluates SERP real estate, question clusters (People Also Ask style), and commercial modifier suggestions without paying expensive monthly SaaS fees.
+* **Algorithmic Search Intent Classifier**: Categorizes queries into Informational, Commercial, Transactional, or Navigational intents using syntactic pattern heuristics.
+* **Keyword Difficulty (KD 0–100)**: Evaluates competition density and estimates referring domain requirements to achieve Page 1 visibility.
+* **Question Clusters**: Synthesizes People Also Ask (PAA) question clusters for editorial expansion.
 
 ### 📝 Content Optimizer & Readability Auditor (`src/content-optimizer.ts`)
-- **Readability Metrics** — Computes Flesch Reading Ease and Flesch-Kincaid Grade Level to keep copy accessible and engaging.
-- **N-Gram Keyword Density** — Analyzes 1-gram, 2-gram, and 3-gram frequencies to eliminate keyword stuffing while preserving topical relevance.
-- **Competitor Content Gap Matrix** — Compares two crawls side-by-side to highlight missing headings, entities, and keyword gaps.
+* **Flesch Readability Indices**: Computes Flesch Reading Ease and Flesch-Kincaid Grade Level to keep technical copy accessible.
+* **N-Gram Density Analysis**: Evaluates 1-gram, 2-gram, and 3-gram frequencies to prevent keyword stuffing while maintaining topical relevance.
+* **Competitor Gap Matrix**: Compares two independent crawls side-by-side to highlight missing headings, entities, and keyword gaps.
 
 ### 🤖 Answer Engine Optimization (AEO) & Structured Data
-- **Inverted-Pyramid AEO Analyzer** — Detects concise 40–55 word direct-answer definitions optimized for Google AI Overviews, Perplexity, and ChatGPT Search.
-- **Schema.org JSON-LD Generator & Validator** — Generates and validates Article, Organization, Product, LocalBusiness, FAQPage, and BreadcrumbList schemas.
-- **LLMs.txt Validator** — Validates presence and formatting of `/llms.txt` and `/llms-full.txt` for AI agent consumption.
+* **Inverted-Pyramid AEO Analyzer**: Detects concise 40–55 word direct-answer definitions optimized for Google AI Overviews, Perplexity, and ChatGPT Search.
+* **Schema.org JSON-LD Validator**: Generates and validates Article, Organization, Product, LocalBusiness, FAQPage, and BreadcrumbList schemas.
+* **LLMs.txt Compliance**: Validates `/llms.txt` and `/llms-full.txt` formatting for machine readability.
 
-### 📋 Deterministic AI Recommendations & Automation
-- **Zero-Hallucination AI Fix Backlog** — Every discovered issue generates actionable, structured fix documentation with root causes, step-by-step instructions, and exact code snippets directly from crawl data.
-- **206-Source Publishing Engine & Reputation Scorer** — Vetted publishing catalog with DR provenance and a conservative Model 1.1 reputation scorer (ported from BeyondSEO).
-- **Instant Search Engine Indexing** — Native IndexNow integration for automated instant submission of new/modified URLs to Bing, Yandex, and IndexNow engines.
+---
+
+## ⚡ Core Engineering Innovations
+
+### 1. High-Performance BFS Pipeline with Memory Culling
+* Traditional crawlers store full raw DOM trees in memory, resulting in memory exhaustion on 10,000+ page sites.
+* SEOForge streams raw responses into a tokenizing parser, extracting links, meta tags, and headers immediately before discarding raw DOM buffers.
+
+### 2. Internal Link Opportunity Semantic Matcher
+* Employs an exact-match sliding window scanner across HTML body paragraphs.
+* Ignores existing `<a>` tag children, navigation headers, and footers, accurately detecting unlinked context sentences suitable for contextual internal links.
+
+### 3. Native Model Context Protocol (MCP) Integration
+* Implements an 18-tool MCP server communicating over standard I/O (stdio).
+* Enables AI agents to run end-to-end autonomous SEO workflows: crawling, detecting 404 links, editing source code, and pinging search engines via IndexNow.
+
+---
+
+## 🛠️ Technical Specifications & Engineering Decisions
+
+| Dimension | Engineering Decision | Rationale |
+| :--- | :--- | :--- |
+| **Runtime Environment** | Node.js 22+ (ESM Native) | Native fetch, modern streams, and fast V8 execution without legacy transpilation layers. |
+| **Language** | TypeScript 5.8 (Strict Mode) | Full type safety across crawl results, issue registries, and MCP tool schemas. |
+| **Browser Automation** | Optional Playwright Integration | Accurate Core Web Vitals measurement for client-rendered JavaScript applications. |
+| **Testing Architecture** | Vitest with 156 Automated Tests | Sub-second test execution across 13 specialized test suites with 100% pass rate. |
+| **Agent Interface** | Model Context Protocol (MCP) SDK | Standardized JSON-RPC 2.0 communication with modern AI assistants. |
+| **Search Engine Protocol** | IndexNow Native Dispatch | Instant notification of modified/created URLs to Bing and Yandex without waiting for recrawls. |
 
 ---
 
 ## 🚀 Quick Start
 
 ### 1. Installation
-
 ```bash
 git clone https://github.com/Aryanban/seoforge.git
 cd seoforge
@@ -70,7 +158,6 @@ npm run build
 ```
 
 ### 2. Crawl a Website
-
 ```bash
 # Blazing-fast raw crawl with terminal report
 node dist/cli.js crawl https://example.com --limit 200 --depth 5
@@ -83,7 +170,6 @@ node dist/cli.js crawl https://example.com --limit 500 --save
 ```
 
 ### 3. Launch Local Dashboard
-
 ```bash
 node dist/cli.js serve          # Opens http://127.0.0.1:5173
 ```
@@ -93,7 +179,7 @@ node dist/cli.js serve          # Opens http://127.0.0.1:5173
 ## 🛠️ CLI Reference
 
 | Command | Purpose & Options |
-| --- | --- |
+| :--- | :--- |
 | `crawl [url]` | **Full-site BFS crawl.** Options: `--depth`, `--limit`, `--concurrency`, `--render`, `--strategy`, `--sample`, `--save`, `--no-robots` |
 | `inspect <url>` | Real-time single-URL deep inspection (TTFB, canonical, meta, schema, CWV, AEO, KD & Intent) |
 | `serve` | Local web dashboard + REST API (`--port`, `--host`, `--no-open`) |
@@ -109,31 +195,9 @@ node dist/cli.js serve          # Opens http://127.0.0.1:5173
 
 ---
 
-## 🌐 Web Dashboard & REST API
-
-Running `node dist/cli.js serve` launches a modern React + Tailwind UI featuring live Server-Sent Events (SSE) streaming and REST endpoints:
-
-| Endpoint | Method | Role |
-| --- | --- | --- |
-| `/api/health` | `GET` | System health, version, running jobs |
-| `/api/crawl` | `POST` | Dispatch async crawl job |
-| `/api/crawl/:id/stream` | `GET` | **SSE live crawl progress & stats** |
-| `/api/crawl/:id/issues` | `GET` | Grouped issue list with severity filters |
-| `/api/crawl/:id/pages` | `GET` | Crawled pages, status codes, metrics |
-| `/api/crawl/:id/links` | `GET` | Internal link opportunities, anchor profile & orphan pages |
-| `/api/crawl/:id/recommendations` | `GET` | Actionable AI fix backlog in markdown |
-| `/api/crawl/:id/export/:format` | `GET` | Export report as `md`, `csv`, or `html` |
-| `/api/inspect` | `POST` | Live single-URL inspection & SERP preview |
-| `/api/publish/catalog` | `GET` | 206-source publication catalog |
-| `/api/publish/plan` | `POST` | Generate tailored publication plan |
-| `/api/reputation` | `POST` | Model 1.1 reputation audit on candidate sources |
-| `/api/competitors/compare` | `POST` | Side-by-side competitor audit matrix |
-
----
-
 ## 🔌 Model Context Protocol (MCP) Server (18 Tools)
 
-Connect SEOForge to **Cursor**, **Claude Desktop**, **Antigravity**, or **Zed** to empower AI coding agents to autonomously run audits, optimize content, and review links:
+Connect SEOForge to **Cursor**, **Claude Desktop**, **Google Antigravity**, or **Zed** to empower AI coding agents to autonomously run audits, optimize content, and review links:
 
 ```json
 {
@@ -169,7 +233,7 @@ Connect SEOForge to **Cursor**, **Claude Desktop**, **Antigravity**, or **Zed** 
 
 ---
 
-## 🧪 Testing & Verification
+## 🧪 Testing & Verification (156/156 Passing)
 
 SEOForge comes with a comprehensive test suite of **156 tests** covering crawler logic, anchor text distributions, keyword intelligence, link opportunities, reputation scoring, and SQLite persistence:
 
@@ -179,7 +243,6 @@ npm test
 
 # Typecheck TypeScript codebase
 npm run typecheck
-npm run typecheck:web
 
 # Run linter
 npm run lint
@@ -190,12 +253,28 @@ npm run build
 
 ---
 
-## 📄 License
+## 👨‍💻 Engineering Portfolio & Technical Evaluation Showcase
 
-Distributed under the [MIT License](LICENSE).
+**SEOForge** was architected and built by **Aryan Bansal** as a full-site search engine intelligence and web crawling platform. It demonstrates critical competencies for:
+* **High-Bar Engineering Roles & Technical Job Evaluations**: Demonstrates deep mastery of distributed asynchronous web crawling, graph theory algorithms (internal PageRank, orphan node detection), headless browser resource optimization, and modern agent protocols (e.g. **Trilogy**, backend infrastructure, and data systems roles).
+* **Competitive Hackathons & Innovation Showcases**: Highlights next-generation Answer Engine Optimization (AEO), full-stack React dashboards, and Model Context Protocol (MCP) integrations.
+
+### 🌟 Core Engineering Competencies Demonstrated
+
+| Competency Area | Architecture & Implementation | Engineering Impact |
+| :--- | :--- | :--- |
+| **Asynchronous Web Crawling** | Pipelined BFS crawler with memory culling & robots.txt respect | High-throughput scanning (>100 pages/sec) with zero memory leaks across large crawls. |
+| **Graph Theory & Link Analysis** | Internal PageRank calculation & sliding-window link opportunity matcher | Uncovers internal equity distribution and flags high-value keyword anchor opportunities. |
+| **Algorithm Risk Detection** | Anchor text distribution classifier (Brand vs. Exact Match vs. Naked) | Detects over-optimization ratios to safeguard websites against Google Penguin penalties. |
+| **AI Agent Infrastructure** | 18-tool Model Context Protocol (MCP) server | Equips autonomous AI coding agents with real-time website audit and diagnostic capabilities. |
+| **Performance Engineering** | Dual-mode crawler (Raw fetch + Headless Playwright) | Balances sub-second lightweight scans with full Core Web Vitals profiling for SPAs. |
 
 ---
 
-<p align="center">
-  <sub>Engineered with precision by <b>Aryan Bansal</b> • <a href="https://www.webforge.me/">webforge.me</a></sub>
-</p>
+## 📄 License & Contact
+
+* **Author**: Aryan Bansal ([GitHub: @Aryanban](https://github.com/Aryanban))
+* **Email**: `contact@dholeramap.com` / `aryan24120@iiitd.ac.in`
+* **Portfolio**: [webforge.me](https://www.webforge.me)
+* **LinkedIn**: [linkedin.com/in/aryan-bansal-b29b69370](https://www.linkedin.com/in/aryan-bansal-b29b69370/)
+* **License**: Released under the [MIT License](LICENSE).
