@@ -1,24 +1,114 @@
-# SEOForge ⚡ • Full-Site SEO Crawler, Audit Engine & MCP Server
-### Screaming Frog + Ahrefs–Grade Technical Audit Engine, Internal Link Intelligence, AEO Scorer & 18-Tool Native MCP Server
+# SEOForge ⚡ • Full-Site SEO Crawler, Audit Engine & 35-Tool MCP Server
+### Screaming Frog + Ahrefs–Grade Technical Audit Engine, Internal Link Intelligence, AEO Scorer & Universal AI Agent Server
 
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org)
 [![TypeScript 5.8](https://img.shields.io/badge/TypeScript-5.8_Strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![Tests Passing](https://img.shields.io/badge/Tests-156%2F156_Passing_(100%25)-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Aryanban/seoforge)
+[![Tests Passing](https://img.shields.io/badge/Tests-229%2F229_Passing_(100%25)-10b981?style=for-the-badge&logo=vitest&logoColor=white)](https://github.com/Aryanban/seoforge)
+[![MCP Server](https://img.shields.io/badge/MCP%20Server-35_Native_Tools-purple?style=for-the-badge)](https://modelcontextprotocol.io)
 [![Protocol: IndexNow](https://img.shields.io/badge/Protocol-IndexNow-008080?style=for-the-badge)](https://www.indexnow.org)
-[![MCP Server](https://img.shields.io/badge/MCP%20Server-18_Native_Tools-purple?style=for-the-badge)](https://modelcontextprotocol.io)
-[![AEO & Schema.org](https://img.shields.io/badge/AEO-Answer_Engine_Opt-8B5CF6?style=for-the-badge)](https://schema.org)
+[![Universal AI Agent](https://img.shields.io/badge/AI_Agents-ChatGPT_•_Claude_•_Cursor_•_Antigravity_•_OpenCode-FF5722?style=for-the-badge)](AGENTS.md)
 
 <br />
 
-**An open-source, Screaming Frog + Ahrefs–grade technical crawler and search intelligence engine with Answer Engine Optimization (AEO), internal link graph scoring, and an 18-tool Model Context Protocol (MCP) server.**  
-*100% Local, Private & Free — Zero subscriptions, zero third-party API keys, and zero data leakage.*
+**The free, open-source, local-first alternative to Screaming Frog (£209/yr) and Ahrefs ($129/mo).**  
+*Full asynchronous BFS web crawler, internal PageRank calculator, Answer Engine Optimization (AEO) scorer, and a 35-tool Model Context Protocol (MCP) server for autonomous AI agents.*  
+*100% Local, Private & Free — Zero subscriptions, zero API keys, zero cloud lock-in, and zero data leakage.*
 
-[System Architecture](#-system-architecture) • [Feature Matrix](#-features--competitive-advantages) • [Core Engineering Innovations](#-core-engineering-innovations) • [Technical Specifications](#-technical-specifications--engineering-decisions) • [Quickstart Guide](#-quick-start) • [Portfolio & Showcase](#-engineering-portfolio--technical-evaluation-showcase)
+[System Architecture](#-system-architecture) • [Competitive Matrix](#-why-seoforge-vs-expensive-saas) • [Universal Agent Setup](#-universal-agent-setup-claude-cursor-antigravity-chatgpt-opencode) • [Feature Matrix](#-features--competitive-advantages) • [Quickstart Guide](#-quick-start) • [Star & Fork](#-why-fork-seoforge)
 
 </div>
+
+---
+
+## 🏆 Why SEOForge vs. Expensive SaaS?
+
+| Feature | SEOForge ⚡ | Screaming Frog | Ahrefs / Semrush | Sitebulb |
+| :--- | :---: | :---: | :---: | :---: |
+| **Annual Price** | **$0 (100% Free & Open Source)** | £209 / yr per seat | $1,548 – $2,388 / yr | $162 – $420 / yr |
+| **Page Crawl Limits** | **Unlimited (Local SQLite)** | 500 (Free) / Paid req. | Quota-gated credits | License tier limited |
+| **AI Agent Native (MCP)** | **Yes (35 Native Tools)** | ❌ No | ❌ No | ❌ No |
+| **Multi-Harness Support** | **Claude, Antigravity, Cursor, Codex, OpenCode** | ❌ No | ❌ No | ❌ No |
+| **Answer Engine Opt (AEO)** | **Yes (Google AI Overviews & Perplexity)** | ❌ No | ❌ No | ❌ No |
+| **Instant IndexNow Dispatch** | **Yes (Bing, Yandex, Naver)** | ❌ Plugin / API required | ❌ No | ❌ No |
+| **Data Privacy & Telemetry** | **100% Localhost (Zero Leakage)** | Local, but proprietary | Cloud-hosted data | Local, but proprietary |
+| **Headless SPA Rendering** | **Yes (Built-in Playwright)** | Yes (Chromium) | Cloud headless | Yes (Chromium) |
+| **Direct AST Code Patcher** | **Yes (`seoforge_patch_codebase`)** | ❌ No | ❌ No | ❌ No |
+
+---
+
+## 🤖 Universal Agent Setup (Claude, Cursor, Antigravity, ChatGPT, OpenCode)
+
+SEOForge connects to any agent harness via the standard Model Context Protocol (MCP):
+
+### 1. Claude Desktop & Claude Code
+Add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "seoforge": {
+      "command": "npx",
+      "args": ["-y", "seoforge", "mcp"]
+    }
+  }
+}
+```
+Or via Claude Code CLI: `claude mcp add seoforge -- npx -y seoforge mcp`
+
+### 2. Google Antigravity (AGY) & Gemini
+Add to `~/.gemini/antigravity/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "seoforge": {
+      "command": "npx",
+      "args": ["-y", "seoforge", "mcp"]
+    }
+  }
+}
+```
+
+### 3. Cursor & Windsurf
+Add to `.cursor/mcp.json` or `~/.codeium/windsurf/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "seoforge": {
+      "command": "npx",
+      "args": ["-y", "seoforge", "mcp"]
+    }
+  }
+}
+```
+
+### 4. OpenAI Codex CLI & ChatGPT Search Agents
+Add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.seoforge]
+command = "npx"
+args = ["-y", "seoforge", "mcp"]
+```
+
+### 5. OpenCode (`opencode.json`)
+```json
+{
+  "mcp": {
+    "seoforge": {
+      "type": "local",
+      "command": ["npx", "-y", "seoforge", "mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+---
+
+## 🔗 Integration with Claude SEO & Blog Ecosystem
+
+SEOForge is integrated directly into [`Aryanban/claude-seo`](https://github.com/Aryanban/claude-seo) as an official extension (`seo-seoforge`). You can drive SEOForge seamlessly from `/seo seoforge crawl <url>` or through unified multi-agent orchestrators!
 
 ---
 
@@ -195,9 +285,9 @@ node dist/cli.js serve          # Opens http://127.0.0.1:5173
 
 ---
 
-## 🔌 Model Context Protocol (MCP) Server (18 Tools)
+## 🔌 Model Context Protocol (MCP) Server (35 Native Tools)
 
-Connect SEOForge to **Cursor**, **Claude Desktop**, **Google Antigravity**, or **Zed** to empower AI coding agents to autonomously run audits, optimize content, and review links:
+Connect SEOForge to **Cursor**, **Claude Desktop**, **Google Antigravity**, **ChatGPT Codex**, **OpenCode**, or **Windsurf** to empower AI coding agents to autonomously run audits, optimize content, and review links:
 
 ```json
 {
@@ -211,45 +301,72 @@ Connect SEOForge to **Cursor**, **Claude Desktop**, **Google Antigravity**, or *
 }
 ```
 
-### Available Tools:
-1. `seoforge_crawl` — Execute full-site crawl and receive grouped issues with AI fix markdown.
-2. `seoforge_crawl_status` — Poll status of async crawl jobs.
-3. `seoforge_get_issues` — Retrieve categorized issues filtered by severity (critical, warning, notice).
-4. `seoforge_get_recommendations` — Fetch ready-to-implement code fix documentation.
+### Complete 35 Tools Reference:
+1. `seoforge_crawl` — Full-site asynchronous crawl with BFS queue & SQLite persistence.
+2. `seoforge_crawl_status` — Poll status, memory metrics, and page counts of active crawls.
+3. `seoforge_get_issues` — Retrieve categorized issues filtered by severity (Critical, Error, Warning, Info).
+4. `seoforge_get_recommendations` — Fetch ready-to-implement code fix documentation and backlogs.
 5. `seoforge_get_page` — Deep on-page technical metrics for a specific crawled URL.
 6. `seoforge_link_report` — Broken links, redirect chains, orphan pages, internal PageRank scores.
-7. `seoforge_sitemap_report` — XML sitemap validity and index coverage.
+7. `seoforge_sitemap_report` — XML sitemap validity, index coverage, and orphaned routes.
 8. `seoforge_export_report` — Export full reports to markdown, CSV, or HTML.
 9. `seoforge_inspect_url` — Real-time on-the-fly inspection of any live URL.
-10. `seoforge_submit_indexnow` — Instant URL submission to Bing and Yandex.
+10. `seoforge_submit_indexnow` — Instant URL submission to Bing, Yandex, and Naver.
 11. `seoforge_sample_sitemap` — Fast audit of random sample pages across large sitemaps.
 12. `seoforge_check_llms_txt` — Validate `/llms.txt` and `/llms-full.txt` compliance.
 13. `seoforge_generate_aeo_snippet` — Synthesize direct-answer paragraphs and FAQPage JSON-LD.
-14. `seoforge_publishing_plan` — Build custom outreach publication plans.
+14. `seoforge_publishing_plan` — Build custom outreach publication plans from 206 sources.
 15. `seoforge_reputation_report` — Score candidate backlink authority using Model 1.1 rubric.
 16. `seoforge_discover_sources` — Discover candidate backlink and mention opportunities.
 17. `seoforge_compare_competitors` — Generate competitor gap analysis on crawl data.
 18. `seoforge_daily_run` — Trigger complete daily routine (crawl, audit, export, IndexNow).
+19. `seoforge_analyze_content` — Flesch readability, word counts, and keyword density.
+20. `seoforge_generate_schema` — Automated Schema.org JSON-LD generation (Article, FAQ, Product, LocalBusiness).
+21. `seoforge_link_opportunities` — Discover unlinked target keyword mentions across internal pages.
+22. `seoforge_keyword_intelligence` — Algorithmic search intent classification & term frequency.
+23. `seoforge_crawl_diff` — Git-style crawl diffing & SEO regression detection between runs.
+24. `seoforge_log_audit` — Web server log parser (Googlebot hit frequency vs wasted crawl budget).
+25. `seoforge_cannibalization` — Detect competing URLs targeting identical keyword intent.
+26. `seoforge_custom_extract` — Extract arbitrary data using CSS selectors, XPath, or Regex.
+27. `seoforge_score_content` — Real-time content grade & SEO optimization scoring.
+28. `seoforge_patch_codebase` — Surgical AST-based code patcher for Next.js, HTML, Astro.
+29. `seoforge_link_intersect` — Common backlink opportunities and competitor domain overlap.
+30. `seoforge_content_gap` — Keyword and topic gap vs top competitor URLs.
+31. `seoforge_robots_test` — RFC 9309 simulation & AI crawler (GPTBot, ClaudeBot) permission check.
+32. `seoforge_trace_redirects` — Trace complete redirect hops, status codes, and loop risks.
+33. `seoforge_pagespeed_lab` — Local lab Core Web Vitals (LCP, CLS, INP, TTFB) estimator.
+34. `seoforge_ci_gate` — Enforce zero-regression thresholds in GitHub Actions & CI.
+35. `seoforge_anchor_profile` — Anchor text distribution & Google Penguin risk profiling.
 
 ---
 
-## 🧪 Testing & Verification (156/156 Passing)
+## 🧪 Testing & Verification (229/229 Passing • 100%)
 
-SEOForge comes with a comprehensive test suite of **156 tests** covering crawler logic, anchor text distributions, keyword intelligence, link opportunities, reputation scoring, and SQLite persistence:
+SEOForge comes with a battle-tested test suite of **30 test files and 229 tests** covering crawler logic, anchor text distributions, keyword intelligence, link opportunities, reputation scoring, and SQLite persistence:
 
 ```bash
-# Run all 156 Vitest unit and integration tests
+# Run all 229 Vitest unit and integration tests
 npm test
 
-# Typecheck TypeScript codebase
+# Typecheck TypeScript codebase (Strict Mode)
 npm run typecheck
 
-# Run linter
-npm run lint
-
-# Build CLI and React dashboard
+# Build CLI and React web dashboard
 npm run build
 ```
+
+---
+
+## 🍴 Why Fork SEOForge?
+
+SEOForge was designed to be modular, extensible, and completely hackable:
+
+1. **Build Custom In-House SEO Tooling**: Embed SEOForge directly into your agency workflow, internal monitoring dashboards, or automated client audits with zero per-page or subscription fees.
+2. **Add Custom Diagnostic Heuristics**: Add new checks in `src/checks/` in under 20 lines of TypeScript with full type safety.
+3. **Automate CI/CD Deploy Gates**: Use `seoforge ci-gate` in GitHub Actions to block breaking deploys when SEO regressions occur.
+4. **Power Multi-Agent Systems**: Combine SEOForge's 35 MCP tools with autonomous agents in Google Antigravity, Claude Code, or Codex.
+
+If you find SEOForge useful, please consider **starring ⭐️ the repository** and **forking 🍴 it** to help support open-source, private web intelligence!
 
 ---
 

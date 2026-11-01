@@ -21,11 +21,16 @@ import { ResolvedCrawlOptions } from "../config.js";
 import { fetchRobots, isDisallowed, RobotsCheckResult } from "./robots.js";
 import { parseSitemap } from "./sitemap-parser.js";
 import { fetchPage } from "./fetcher.js";
-import { extractLinks, extractImages, ExtractedLinks } from "./link-extractor.js";
+import { extractLinks, extractImages, extractVisibleText, ExtractedLinks } from "./link-extractor.js";
 import { renderUrl } from "./renderer.js";
 import { runPageChecks, PageCheckContext } from "../checks/registry.js";
 import { buildIssueSummary } from "../checks/summary.js";
 import { generateRecommendations } from "../ai/recommendations.js";
+import { detectDuplicates } from "../analysis/duplicates.js";
+import { auditHreflangSitewide } from "../analysis/i18n.js";
+import { auditAiBotPosture } from "../analysis/ai-crawlers.js";
+import { validateLlmsTxt } from "../analysis/llms-txt.js";
+import { extractCustomFields } from "../analysis/custom-extractor.js";
 
 export class Crawler extends EventEmitter {
   private stopped = false;
@@ -46,6 +51,9 @@ export class Crawler extends EventEmitter {
   private llmsTxtAccessible?: boolean;
   private llmsFullTxtAccessible?: boolean;
   private maxDepthReached = 0;
+  private llmsTxtIssues: AuditIssue[] = [];
+  private aiPostureIssues: AuditIssue[] = [];
+  private hreflangPairsByUrl = new Map<string, Array<{ lang: string; href: string }>>();
   private requestedCount = 0;
   private lastRequestTimes: number[] = [];
   private crawlId: string;
@@ -105,9 +113,59 @@ export class Crawler extends EventEmitter {
       this.sitemapUrlSet = new Set(sitemapResult.entries.map((e) => normalizeUrl(e.url)));
     }
 
-    // 3. llms.txt probes
+    // 3. llms.txt probes (full validation: spec compliance, not just 200)
     this.llmsTxtAccessible = await this.probe(`${origin}/llms.txt`);
     this.llmsFullTxtAccessible = await this.probe(`${origin}/llms-full.txt`);
+    try {
+      const llmsRes = await fetchPage(`${origin}/llms.txt`, { timeoutMs: 8000, method: "GET" });
+      const llmsResult = validateLlmsTxt({
+        url: `${origin}/llms.txt`,
+        status: llmsRes.status,
+        contentType: llmsRes.contentType,
+        body: llmsRes.html,
+        byteSize: llmsRes.contentLengthBytes,
+      });
+      for (const f of llmsResult.findings) {
+        this.llmsTxtIssues.push({
+          id: f.id,
+          name: f.name,
+          severity: f.severity,
+          category: "AEO",
+          message: f.message,
+          url: `${origin}/llms.txt`,
+        });
+      }
+    } catch {
+      /* llms.txt validation is non-fatal */
+    }
+    // 3b. AI-crawler robots posture audit (visibility-loss warnings)
+    try {
+      const posture = auditAiBotPosture(this.robots?.raw || "");
+      for (const token of posture.blockedSearchBots) {
+        this.aiPostureIssues.push({
+          id: "ai_search_bot_blocked",
+          name: `AI search crawler blocked: ${token}`,
+          severity: "Warning",
+          category: "AEO",
+          message: `${token} (AI-search crawler) is disallowed by robots.txt — the site cannot be cited in that engine's AI answers. Allow it unless exclusion is deliberate.`,
+          url: `${origin}/robots.txt`,
+          details: { token },
+        });
+      }
+      for (const token of posture.blockedFetchers) {
+        this.aiPostureIssues.push({
+          id: "ai_fetcher_blocked",
+          name: `AI assistant fetcher blocked: ${token}`,
+          severity: "Notice",
+          category: "AEO",
+          message: `${token} (user-triggered assistant fetcher) is disallowed — assistants cannot open site pages when users ask.`,
+          url: `${origin}/robots.txt`,
+          details: { token },
+        });
+      }
+    } catch {
+      /* posture audit is non-fatal */
+    }
 
     // 4. Seed the queue per strategy
     const queue = new CrawlQueue(opts.maxDepth, opts.limit);
@@ -121,6 +179,9 @@ export class Crawler extends EventEmitter {
 
     // 7. Link-graph pass: incoming links, orphans, internal link score
     this.applyLinkGraph();
+
+    // 7b. Sitewide passes: duplicates, hreflang reciprocity (need full page set)
+    this.applySitewideChecks(targetUrl);
 
     // 8. Aggregate issues
     const issuesSummary = buildIssueSummary(this.pages, this.previousIssueCounts());
@@ -203,6 +264,7 @@ export class Crawler extends EventEmitter {
       thresholds: o.thresholds,
       paths: o.paths,
       seedUrls: o.seedUrls,
+      customExtractors: o.customExtractors,
     };
   }
 
@@ -329,8 +391,11 @@ export class Crawler extends EventEmitter {
 
       const links = pageData.html
         ? extractLinks(pageData.html, pageData.finalUrl)
-        : { links: [], internalTargets: [], externalTargets: [] };
+        : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };
+      if (links.hreflang.length > 0) this.hreflangPairsByUrl.set(item.url, links.hreflang);
       const images = pageData.html ? extractImages(pageData.html, pageData.finalUrl) : [];
+      // Clean body text for duplicate detection (stored on the page + hashed sitewide)
+      const bodyText = pageData.html ? extractVisibleText(pageData.html) : "";
       this.rawExtractedLinks.push(links);
       this.allImages.push(...images);
 
@@ -360,6 +425,7 @@ export class Crawler extends EventEmitter {
         expectedEntities: opts.expectedEntities,
         canonicalPolicy: opts.canonicalPolicy,
         cwv: pageData.cwv,
+        contentLengthBytes: pageData.contentLengthBytes,
         sitemapUrls: this.sitemapUrlSet,
         sourceUrl: item.source,
         isRedirect: pageData.isRedirect,
@@ -368,6 +434,10 @@ export class Crawler extends EventEmitter {
       };
 
       const { page, issues } = runPageChecks(ctx);
+      page.bodyText = bodyText;
+      if (opts.customExtractors && opts.customExtractors.length > 0 && pageData.html) {
+        page.customExtractions = extractCustomFields(pageData.html, opts.customExtractors);
+      }
       this.pages.push(page);
       for (const issue of issues) this.emit("issue", issue);
       this.emit("page", page);
@@ -764,6 +834,128 @@ export class Crawler extends EventEmitter {
         this.emit("issue", issue);
       }
     }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Sitewide checks: duplicates, hreflang, llms.txt, AI posture          */
+  /* ------------------------------------------------------------------ */
+
+  private applySitewideChecks(targetUrl: string): void {
+    // 1. Attach sitewide-only issues (llms.txt + AI posture) to the root page
+    // so they flow through the normal summary/recommendation pipeline.
+    const root = this.pages.find((p) => p.normalizedUrl === this.rootUrl) || this.pages[0];
+    if (root) {
+      for (const issue of [...this.llmsTxtIssues, ...this.aiPostureIssues]) {
+        root.auditIssues.push(issue);
+        root.issues.push(`[${issue.severity}] ${issue.name}`);
+        this.emit("issue", issue);
+      }
+      void targetUrl;
+    }
+
+    // 2. Duplicate content: exact-hash groups + shingle-Jaccard near-dups
+    try {
+      const inputs = this.pages
+        .filter((p) => p.status === 200 && p.bodyText && p.bodyText.length > 0)
+        .map((p) => ({ url: p.url, bodyText: p.bodyText || "" }));
+      if (inputs.length >= 2) {
+        const { exactGroups, nearDuplicates } = detectDuplicates(inputs);
+        const pageByUrl = new Map(this.pages.map((p) => [p.url, p]));
+        const pushTo = (url: string, issue: AuditIssue) => {
+          const pg = pageByUrl.get(url);
+          if (!pg) return;
+          pg.auditIssues.push(issue);
+          pg.issues.push(`[${issue.severity}] ${issue.name}`);
+          this.emit("issue", issue);
+        };
+        for (const group of exactGroups) {
+          const [primary, ...rest] = group;
+          for (const dup of rest) {
+            pushTo(dup, {
+              id: "duplicate_content_exact",
+              name: "Exact duplicate content",
+              severity: "Error",
+              category: "Content",
+              message: `Page body text is byte-identical (normalised) to ${primary}. Consolidate with a canonical or rewrite.`,
+              url: dup,
+              details: { duplicateOf: primary },
+            });
+          }
+        }
+        for (const nd of nearDuplicates) {
+          pushTo(nd.url, {
+            id: "duplicate_content_near",
+            name: "Near-duplicate content",
+            severity: "Warning",
+            category: "Content",
+            message: `Page is ${Math.round(nd.similarity * 100)}% similar (5-word shingle Jaccard ≥ 0.85) to ${nd.duplicateOf}. Differentiate or canonicalise to avoid cannibalisation.`,
+            url: nd.url,
+            details: { duplicateOf: nd.duplicateOf, similarity: nd.similarity },
+          });
+        }
+      }
+    } catch {
+      /* duplicate detection is non-fatal */
+    }
+
+    // 3. hreflang reciprocity audit across the crawled set
+    try {
+      const hreflangPages = new Map<string, Array<{ lang: string; href: string }>>();
+      const pageInfo = new Map<string, { status: number; isIndexable: boolean }>();
+      for (const p of this.pages) {
+        pageInfo.set(p.url, { status: p.status, isIndexable: p.isIndexable });
+        if (p.hreflang && p.hreflang.length > 0 && p.status === 200) {
+          // Reconstruct hrefs: PageAuditResult stores langs; recover hrefs from
+          // the raw HTML is expensive — instead match by resolving lang→URL via
+          // the page's own outgoing alternates is unavailable post-hoc, so we
+          // record hreflang presence here and audit reciprocity from stored links.
+          hreflangPages.set(p.url, []);
+        }
+      }
+      // Recover full hreflang link pairs from LinkRecords is not available;
+      // audit what we can: pages declaring hreflang without x-default/self-ref
+      // was already covered per-page. Here we flag clusters where exactly one
+      // side declares (unreciprocated cluster) using outgoing internal links
+      // as the discovery signal would over-reach — so this pass only runs when
+      // href data was captured during the crawl (see hreflangLinks below).
+      void hreflangPages;
+      const pairs = this.hreflangLinkPairs();
+      if (pairs.pages.size > 0) {
+        for (const issue of auditHreflangSitewide({ pages: pairs.pages, pageInfo: pairs.pageInfo })) {
+          const pg = this.pages.find((p) => p.url === issue.url);
+          if (!pg) continue;
+          const auditIssue: AuditIssue = {
+            id: issue.id,
+            name: issue.name,
+            severity: issue.severity,
+            category: "International",
+            message: issue.message,
+            url: issue.url,
+            details: issue.details,
+          };
+          pg.auditIssues.push(auditIssue);
+          pg.issues.push(`[${auditIssue.severity}] ${auditIssue.name}`);
+          this.emit("issue", auditIssue);
+        }
+      }
+    } catch {
+      /* hreflang audit is non-fatal */
+    }
+  }
+
+  /**
+   * hreflang pairs captured during the crawl. The per-page check context does
+   * not retain hrefs, so the crawler re-derives them here from stored HTML is
+   * intentionally skipped (memory); instead this returns an empty map unless
+   * a subclass/test injects pairs. Kept as a seam for the render pipeline.
+   */
+  protected hreflangLinkPairs(): {
+    pages: Map<string, Array<{ lang: string; href: string }>>;
+    pageInfo: Map<string, { status: number; isIndexable: boolean }>;
+  } {
+    const pageInfo = new Map<string, { status: number; isIndexable: boolean }>();
+    for (const p of this.pages) pageInfo.set(p.url, { status: p.status, isIndexable: p.isIndexable });
+    return { pages: this.hreflangPairsByUrl, pageInfo };
   }
 
   private placeholderPage(url: string, depth: number, issue: AuditIssue): PageAuditResult {

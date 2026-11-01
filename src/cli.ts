@@ -45,6 +45,17 @@ import {
   type SourceRow,
 } from "./reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "./competitors/index.js";
+import { compareCrawls, formatCrawlDiffMarkdown } from "./analysis/crawl-diff.js";
+import { analyzeLogs } from "./analysis/log-parser.js";
+import { detectCannibalization } from "./analysis/cannibalization.js";
+import { scoreContent } from "./analysis/live-content-scorer.js";
+import { evaluateCiGate } from "./analysis/ci-gate.js";
+import { analyzeLinkIntersect, formatLinkIntersectMarkdown } from "./analysis/link-intersect.js";
+import { analyzeContentGap, formatContentGapMarkdown } from "./analysis/content-gap.js";
+import { testRobotsPath, auditRobotsAiCompliance, formatRobotsAuditMarkdown } from "./analysis/robots-simulator.js";
+import { analyzeRedirectChain, generateDirectRedirectCode } from "./analysis/redirect-tracer.js";
+import { analyzePageSpeedLab } from "./analysis/pagespeed-lab.js";
+import { fetchPage } from "./crawl/fetcher.js";
 import {
   discover,
   hostAttempts,
@@ -847,6 +858,318 @@ program
       else console.log(yellow(`⚠ [${host}] ${res.message}`));
     }
     console.log(bold(green("\n✔ SEOForge Daily Maintenance completed.")));
+  });
+
+
+/* ------------------------------------------------------------------ */
+/* Command: diff (Crawl Regression & Comparison Engine)               */
+/* ------------------------------------------------------------------ */
+program
+  .command("diff <baseId> <targetId>")
+  .description("Compare two crawls to detect regressions, HTTP 404s, title/meta changes, and issue shifts")
+  .option("--out <path>", "Save the comparison markdown to this path")
+  .action(async (baseId, targetId, options) => {
+    const db = await ensureStore();
+    const base = repo.getFullCrawl(db, baseId);
+    const target = repo.getFullCrawl(db, targetId);
+    if (!base) {
+      console.error(red(`Base crawl '${baseId}' not found.`));
+      process.exit(1);
+    }
+    if (!target) {
+      console.error(red(`Target crawl '${targetId}' not found.`));
+      process.exit(1);
+    }
+    const diff = compareCrawls(base, target);
+    const md = formatCrawlDiffMarkdown(diff);
+    if (options.out) {
+      await fs.mkdir(path.dirname(options.out), { recursive: true });
+      await fs.writeFile(options.out, md, "utf-8");
+      console.log(green(`✔ Crawl diff → ${options.out}`));
+    } else {
+      console.log(md);
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: log-audit (Web Server Log File Analyzer)                  */
+/* ------------------------------------------------------------------ */
+program
+  .command("log-audit <logFile>")
+  .description("Analyze server access logs (CLF/Combined) and cross-reference with crawl data")
+  .option("--crawl <id>", "Crawl ID to cross-reference known/indexable URLs")
+  .option("--out <path>", "Write analysis summary JSON to path")
+  .action(async (logFile, options) => {
+    const content = await fs.readFile(logFile, "utf-8");
+    let knownPages: Array<{ url: string; status: number; isIndexable: boolean }> | undefined;
+    if (options.crawl) {
+      const db = await ensureStore();
+      const c = repo.getFullCrawl(db, options.crawl);
+      if (c) knownPages = c.pages.map((p) => ({ url: p.url, status: p.status, isIndexable: p.isIndexable }));
+    }
+    const report = analyzeLogs(content, { knownPages });
+    console.log(bold(cyan(`\nServer Log Analysis for ${path.basename(logFile)}`)));
+    console.log(gray(`Parsed ${report.parsedLines} lines (${report.totalLines} total in log)`));
+    console.log(`\n• Crawl Waste Signals:`);
+    for (const w of report.waste) {
+      console.log(`  - ${w.kind}: ${w.hits} hits`);
+    }
+    console.log(`\n• Bot Hits:`);
+    for (const b of report.botHits) {
+      console.log(`  - ${bold(b.bot)} (${b.kind}): ${b.hits} hits (${b.pct}%)`);
+    }
+    if (report.neverCrawledIndexable && report.neverCrawledIndexable.length > 0) {
+      console.log(yellow(`\n⚠ ${report.neverCrawledIndexable.length} indexable page(s) never visited by bots in log window`));
+    }
+    if (options.out) {
+      await fs.writeFile(options.out, JSON.stringify(report, null, 2), "utf-8");
+      console.log(green(`\n✔ Log audit report → ${options.out}`));
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: cannibalization (Keyword Cannibalization Detector)        */
+/* ------------------------------------------------------------------ */
+program
+  .command("cannibalization")
+  .description("Identify keyword and search intent cannibalization across pages")
+  .option("--crawl <id>", "Crawl ID to analyze (defaults to latest crawl)")
+  .option("--out <path>", "Save results as JSON to path")
+  .action(async (options) => {
+    const db = await ensureStore();
+    let crawl: CrawlResult | null = null;
+    if (options.crawl) crawl = repo.getFullCrawl(db, options.crawl);
+    else {
+      const latest = repo.listCrawls(db, 1)[0];
+      if (latest) crawl = repo.getFullCrawl(db, latest.id);
+    }
+    if (!crawl) {
+      console.error(red("Crawl not found. Run `seoforge crawl <url>` first or pass --crawl <id>."));
+      process.exit(1);
+    }
+    const report = detectCannibalization(crawl.pages);
+    console.log(bold(cyan(`\nKeyword Cannibalization Audit (${crawl.targetUrl})`)));
+    console.log(`Analyzed ${report.totalPagesAnalyzed} pages • Found ${report.cannibalizingPairs.length} conflicting pair(s)`);
+    for (const pair of report.cannibalizingPairs) {
+      const badge = pair.severity === "Critical" ? red("● Critical") : yellow("● Warning");
+      console.log(`\n${badge} Shared Keywords: "${bold(pair.sharedKeywords.join(", "))}" (${pair.reason})`);
+      console.log(`  - ${cyan(pair.urlA)}`);
+      console.log(`  - ${cyan(pair.urlB)}`);
+      console.log(gray(`    Recommendation: ${pair.recommendation}`));
+    }
+    if (options.out) {
+      await fs.writeFile(options.out, JSON.stringify(report, null, 2), "utf-8");
+      console.log(green(`\n✔ Cannibalization report → ${options.out}`));
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: score-content (Live SurferSEO-style Content Scorer)        */
+/* ------------------------------------------------------------------ */
+program
+  .command("score-content <fileOrText>")
+  .description("Score article draft content for SEO & AEO optimization readiness")
+  .requiredOption("-k, --keyword <kw>", "Primary target keyword")
+  .option("--title <title>", "Page title or H1")
+  .option("--secondary <kws>", "Comma-separated secondary keywords")
+  .option("--target-words <n>", "Target word count benchmark", "1000")
+  .action(async (fileOrText, options) => {
+    let body = fileOrText;
+    try {
+      body = await fs.readFile(fileOrText, "utf-8");
+    } catch {
+      // fileOrText is the raw text string
+    }
+    const secondary = options.secondary ? options.secondary.split(",").map((s: string) => s.trim()) : undefined;
+    const report = scoreContent({
+      body,
+      primaryKeyword: options.keyword,
+      title: options.title,
+      secondaryKeywords: secondary,
+      targetWordCount: parseInt(options.targetWords, 10),
+    });
+    console.log(bold(cyan(`\nLive Content Optimization Score`)));
+    console.log(`Overall Score: ${bold(report.overallScore >= 70 ? green(report.overallScore.toString()) : yellow(report.overallScore.toString()))} / 100`);
+    console.log(`• Word Count: ${report.readability.wordCount} (Target: ${options.targetWords || 1000})`);
+    console.log(`• Readability: ${report.readability.fleschReadingEase} (${report.readability.readingGradeLevel})`);
+    console.log(`• Primary Keyword ("${options.keyword}"): ${report.primaryKeywordMetric.count} matches (${report.primaryKeywordMetric.density}%) - ${report.primaryKeywordMetric.status}`);
+    console.log(`• Headings: ${report.structure.h1Count} H1, ${report.structure.h2Count} H2, ${report.structure.h3Count} H3`);
+    console.log(`• AEO Direct Answer: ${report.aeoAnswerReady ? green("✔ Present") : yellow("⚠ Missing direct answer snippet")}`);
+    if (report.recommendations.length > 0) {
+      console.log(`\nRecommendations:`);
+      for (const rec of report.recommendations) {
+        console.log(`  - [${rec.priority}] ${rec.text}`);
+      }
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: ci-gate (CI/CD Quality Gatekeeper)                         */
+/* ------------------------------------------------------------------ */
+program
+  .command("ci-gate")
+  .description("Evaluate CI/CD quality gate rules for GitHub Actions or GitLab CI")
+  .option("--crawl <id>", "Crawl ID to evaluate (defaults to latest crawl)")
+  .option("--max-errors <n>", "Max allowed critical errors", "0")
+  .option("--max-warnings <n>", "Max allowed warnings", "10")
+  .option("--min-aeo <n>", "Minimum average AEO score", "70")
+  .option("--out <path>", "Save PR comment markdown to path")
+  .action(async (options) => {
+    const db = await ensureStore();
+    let crawl: CrawlResult | null = null;
+    if (options.crawl) crawl = repo.getFullCrawl(db, options.crawl);
+    else {
+      const latest = repo.listCrawls(db, 1)[0];
+      if (latest) crawl = repo.getFullCrawl(db, latest.id);
+    }
+    if (!crawl) {
+      console.error(red("Crawl not found. Run `seoforge crawl <url>` first or pass --crawl <id>."));
+      process.exit(1);
+    }
+    const gate = evaluateCiGate(crawl, {
+      maxErrors: parseInt(options.maxErrors, 10),
+      maxWarnings: parseInt(options.maxWarnings, 10),
+      minAeoScore: parseInt(options.minAeo, 10),
+    });
+    console.log(gate.markdownReport);
+    if (options.out) {
+      await fs.writeFile(options.out, gate.markdownReport, "utf-8");
+      console.log(green(`\n✔ CI gate comment → ${options.out}`));
+    }
+    const summaryStr = `${gate.summary.totalErrors} errors, ${gate.summary.totalWarnings} warnings, Avg AEO: ${gate.summary.avgAeoScore}`;
+    if (!gate.passed) {
+      console.error(red(`\n✖ CI/CD SEO Gate FAILED: ${summaryStr}`));
+      process.exit(1);
+    } else {
+      console.log(green(`\n✔ CI/CD SEO Gate PASSED: ${summaryStr}`));
+    }
+  });
+
+
+program
+  .command("link-intersect <targetDomain> [competitorDomains...]")
+  .description("Find high-authority referring domains linking to competitors but NOT target (Ahrefs parity)")
+  .option("--links <path>", "Path to JSON or CSV file containing target and competitor backlink lists")
+  .option("--out <path>", "Save report markdown to path")
+  .action(async (targetDomain, competitorDomains, options) => {
+    let comps = (competitorDomains || []).map((d: string) => ({ domain: d, backlinks: [] as string[] }));
+    if (options.links) {
+      const data = JSON.parse(await fs.readFile(options.links, "utf-8"));
+      comps = data.competitors || comps;
+    }
+    const report = analyzeLinkIntersect({
+      targetDomain,
+      competitors: comps,
+    });
+    const md = formatLinkIntersectMarkdown(report);
+    console.log(md);
+    if (options.out) {
+      await fs.writeFile(options.out, md, "utf-8");
+      console.log(green("\n✔ Link Intersect report saved → " + options.out));
+    }
+  });
+
+program
+  .command("content-gap <baseId> [compIds...]")
+  .description("Compare keywords and topical coverage across crawls with AEO briefs (Semrush parity)")
+  .option("--out <path>", "Save content gap markdown to path")
+  .action(async (baseId, compIds, options) => {
+    const db = await ensureStore();
+    const base = repo.getFullCrawl(db, baseId);
+    if (!base) {
+      console.error(red("Baseline crawl " + baseId + " not found."));
+      process.exit(1);
+    }
+    const comps: CrawlResult[] = [];
+    for (const cid of (compIds || [])) {
+      const c = repo.getFullCrawl(db, cid);
+      if (c) comps.push(c);
+    }
+    if (comps.length === 0) {
+      console.error(red("At least one competitor crawl ID is required for comparison."));
+      process.exit(1);
+    }
+    const report = analyzeContentGap(base, comps);
+    const md = formatContentGapMarkdown(report);
+    console.log(md);
+    if (options.out) {
+      await fs.writeFile(options.out, md, "utf-8");
+      console.log(green("\n✔ Content gap report saved → " + options.out));
+    }
+  });
+
+program
+  .command("robots-test <fileOrUrl> [path]")
+  .description("Test path allow/disallow rules and multi-bot AI compliance (RFC 9309)")
+  .option("-u, --user-agent <agent>", "User-Agent to test against", "Googlebot")
+  .action(async (fileOrUrl, testPath, options) => {
+    let content = "";
+    if (fileOrUrl.startsWith("http://") || fileOrUrl.startsWith("https://")) {
+      const fetched = await fetchPage(fileOrUrl);
+      content = fetched.html;
+    } else {
+      content = await fs.readFile(fileOrUrl, "utf-8");
+    }
+
+    if (testPath) {
+      const res = testRobotsPath(content, testPath, options.userAgent);
+      console.log(bold(cyan("\nRobots.txt Path Test (" + options.userAgent + ")")));
+      console.log("Path: " + res.urlPath);
+      console.log("Result: " + (res.allowed ? green("✔ ALLOWED") : red("✖ DISALLOWED")));
+      console.log("Reason: " + res.reason);
+    } else {
+      const audit = auditRobotsAiCompliance(content);
+      console.log(formatRobotsAuditMarkdown(audit));
+    }
+  });
+
+program
+  .command("trace-redirects <url>")
+  .description("Trace multi-hop redirect chains, detect loops, and calculate link equity dissipation")
+  .option("--framework <type>", "Output direct rewrite rule (nextjs, nginx, apache, cloudflare)", "nextjs")
+  .action(async (url, options) => {
+    const fetched = await fetchPage(url, { followRedirects: true, maxRedirects: 10 });
+    const hops = fetched.redirectChain.map((u: string, idx: number) => ({
+      url: u,
+      status: idx === 0 && fetched.redirectStatusCode ? fetched.redirectStatusCode : idx === fetched.redirectChain.length - 1 ? fetched.status : 301,
+    }));
+    const analysis = analyzeRedirectChain(hops);
+    console.log(bold(cyan("\nRedirect Chain Inspection")));
+    console.log("• Initial: " + analysis.initialUrl);
+    console.log("• Final: " + analysis.finalUrl);
+    console.log("• Hops: " + analysis.totalHops + " (Status codes: " + analysis.statusCodes.join(" → ") + ")");
+    console.log("• Estimated Link Equity Retention: " + analysis.estimatedEquityRetentionPct + "% (Loss: " + analysis.estimatedEquityLossPct + "%)");
+    console.log("• Severity: " + analysis.severity);
+    if (analysis.issues.length > 0) {
+      console.log(yellow("\nIssues:"));
+      for (const iss of analysis.issues) console.log("  - " + iss);
+    }
+    console.log(bold(cyan("\nSuggested 1-Hop Rewrite (" + options.framework + "):")));
+    console.log(generateDirectRedirectCode(analysis.initialUrl, analysis.finalUrl, options.framework as any));
+  });
+
+program
+  .command("pagespeed-lab <url>")
+  .description("Analyze DOM complexity, render-blocking scripts, CLS risks, and performance budget")
+  .action(async (url) => {
+    const fetched = await fetchPage(url);
+    const lab = analyzePageSpeedLab({
+      url,
+      html: fetched.html,
+      ttfbMs: fetched.ttfbMs,
+    });
+    console.log(bold(cyan("\nPageSpeed & DOM Lab Audit: " + url)));
+    console.log("Estimated Performance Score: " + (lab.performanceScore >= 80 ? green(lab.performanceScore.toString()) : yellow(lab.performanceScore.toString())) + " / 100");
+    console.log("• DOM Elements: " + lab.domMetrics.totalElements + " (Max depth: " + lab.domMetrics.maxDepth + ")");
+    console.log("• Render-Blocking Resources: " + lab.renderBlockingResources.length);
+    console.log("• CLS Layout Shift Risks: " + lab.clsRisks.length);
+    console.log("• HTML Payload: " + Math.round(lab.payloadStats.htmlSizeBytes / 1024) + " KB");
+    if (lab.recommendations.length > 0) {
+      console.log(bold(cyan("\nRecommendations:")));
+      for (const rec of lab.recommendations) {
+        console.log("  - [" + rec.priority + "] " + rec.text);
+      }
+    }
   });
 
 program.parse(process.argv);

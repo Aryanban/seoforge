@@ -16,6 +16,7 @@ import {
 } from "../types.js";
 import { Crawler } from "../crawl/crawler.js";
 import { crawlSite } from "../crawl/crawler.js";
+import { fetchPage } from "../crawl/fetcher.js";
 import { auditSinglePage } from "../audit-page.js";
 import { parseSitemap } from "../crawl/sitemap-parser.js";
 import { submitToIndexNow } from "../indexnow.js";
@@ -48,6 +49,18 @@ import {
   type SearchQuery,
 } from "../discovery/index.js";
 import { loadConfig, mergeCrawlOptions } from "../config.js";
+import { compareCrawls, formatCrawlDiffMarkdown } from "../analysis/crawl-diff.js";
+import { analyzeLogs } from "../analysis/log-parser.js";
+import { detectCannibalization } from "../analysis/cannibalization.js";
+import { extractCustomFields, CustomExtractorRule } from "../analysis/custom-extractor.js";
+import { analyzeLinkIntersect, formatLinkIntersectMarkdown } from "../analysis/link-intersect.js";
+import { analyzeContentGap, formatContentGapMarkdown } from "../analysis/content-gap.js";
+import { testRobotsPath, auditRobotsAiCompliance, formatRobotsAuditMarkdown } from "../analysis/robots-simulator.js";
+import { analyzeRedirectChain, generateDirectRedirectCode } from "../analysis/redirect-tracer.js";
+import { analyzePageSpeedLab } from "../analysis/pagespeed-lab.js";
+import { scoreContent } from "../analysis/live-content-scorer.js";
+import { generateCodePatch } from "../analysis/code-patcher.js";
+import { evaluateCiGate } from "../analysis/ci-gate.js";
 import { openStore } from "../store/db.js";
 import * as repo from "../store/repository.js";
 import { analyzeContent } from "../content-analyzer.js";
@@ -452,6 +465,206 @@ export function createMcpServer(): Server {
             },
           },
           required: ["keyword"],
+        },
+      },
+      {
+        name: "seoforge_crawl_diff",
+        description: "Compare two crawls (e.g. Staging vs Production, or Today vs Yesterday) to detect added/removed URLs, HTTP status regressions (200->404), title/meta/canonical changes, lost indexability, and new issues (Screaming Frog crawl comparison & Sitebulb staging diff parity).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            base_crawl_id: { type: "string", description: "Base crawl ID (or older crawl)" },
+            target_crawl_id: { type: "string", description: "Target crawl ID (or newer / staging crawl)" },
+          },
+          required: ["base_crawl_id", "target_crawl_id"],
+        },
+      },
+      {
+        name: "seoforge_log_audit",
+        description: "Parse web server access logs (CLF / Combined Log Format from Nginx, Apache, Cloudflare) and cross-reference with crawl data to detect wasted crawl budget on 4xx/5xx/redirects, Googlebot hit distributions, and indexable pages never visited by search bots (Screaming Frog Log File Analyzer parity).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            log_content: { type: "string", description: "Raw access log string content" },
+            log_path: { type: "string", description: "Path to access log file on disk" },
+            crawl_id: { type: "string", description: "Optional crawl ID to cross-reference known/indexable URLs" },
+          },
+        },
+      },
+      {
+        name: "seoforge_cannibalization",
+        description: "Scan crawled pages to identify keyword cannibalization where multiple URLs compete for the exact same target keywords, intent, or primary headings (Semrush & Ahrefs parity).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID to analyze (defaults to latest crawl if omitted)" },
+          },
+        },
+      },
+      {
+        name: "seoforge_custom_extract",
+        description: "Execute custom CSS selectors, XPath expressions, or Regular Expressions across crawled pages or HTML to extract arbitrary data like prices, SKUs, authors, or tracking codes (Screaming Frog Custom Extraction parity).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            html: { type: "string", description: "HTML content to extract from" },
+            url: { type: "string", description: "URL to fetch and extract from if html not provided" },
+            rules: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  type: { type: "string", enum: ["css", "xpath", "regex"] },
+                  selector: { type: "string" },
+                  attribute: { type: "string" },
+                  extractAll: { type: "boolean" },
+                },
+                required: ["id", "name", "type", "selector"],
+              },
+            },
+          },
+          required: ["rules"],
+        },
+      },
+      {
+        name: "seoforge_score_content",
+        description: "Real-time content optimization scorer (SurferSEO & Semrush Writing Assistant parity). Evaluates text/markdown for primary & secondary keyword density, Flesch readability, heading hierarchy, and AEO inverted pyramid direct answer readiness.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            body: { type: "string", description: "Article body text or Markdown" },
+            primary_keyword: { type: "string", description: "Primary target keyword" },
+            title: { type: "string", description: "Page title or H1" },
+            secondary_keywords: { type: "array", items: { type: "string" } },
+            target_word_count: { type: "number", description: "Target word count benchmark (default 1000)" },
+          },
+          required: ["body", "primary_keyword"],
+        },
+      },
+      {
+        name: "seoforge_patch_codebase",
+        description: "Autonomous codebase patcher (Self-Healing SEO). Automatically generates code modifications and fixes for detected SEO issues across Next.js (App Router), Astro, and HTML files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            source_code: { type: "string", description: "Original file contents" },
+            issue_id: { type: "string", description: "Issue identifier (e.g. 'title_missing', 'meta_desc_missing', 'canonical_missing', 'img_missing_alt', 'json_ld_missing')" },
+            file_path: { type: "string", description: "File path (e.g. 'app/page.tsx', 'index.html')" },
+            fix_data: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+                canonicalUrl: { type: "string" },
+                schemaJson: { type: "object" },
+                imgSrc: { type: "string" },
+                imgAlt: { type: "string" },
+              },
+            },
+          },
+          required: ["source_code", "issue_id", "fix_data"],
+        },
+      },
+      {
+        name: "seoforge_link_intersect",
+        description: "Ahrefs Link Intersect parity: Find high-authority referring domains and backlink opportunities linking to multiple competitors but not your target site, cross-referenced with the 206-source publishing catalog.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            target_domain: { type: "string", description: "Target domain (e.g. mysite.com)" },
+            target_backlinks: { type: "array", items: { type: "string" }, description: "Backlinks/referring domains the target site already has" },
+            competitors: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  domain: { type: "string" },
+                  backlinks: { type: "array", items: { type: "string" } },
+                },
+                required: ["domain", "backlinks"],
+              },
+              description: "List of competitor domains and their backlink URLs",
+            },
+            min_competitor_overlap: { type: "number", description: "Minimum competitors linking to qualify as gap (default 2)" },
+          },
+          required: ["target_domain", "competitors"],
+        },
+      },
+      {
+        name: "seoforge_content_gap",
+        description: "Semrush Keyword & Content Gap parity: Compare keyword and topical coverage across baseline crawl and competitor crawls. Categorizes terms into Missing, Untapped, Weak, Shared, and Strong with AEO briefs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            baseline_crawl_id: { type: "string", description: "Crawl ID of baseline site" },
+            competitor_crawl_ids: { type: "array", items: { type: "string" }, description: "Crawl IDs of competitor sites to compare" },
+          },
+          required: ["baseline_crawl_id", "competitor_crawl_ids"],
+        },
+      },
+      {
+        name: "seoforge_robots_test",
+        description: "Google Search Console & Screaming Frog Robots.txt Simulator: Test whether arbitrary paths are allowed or disallowed under RFC 9309 for Search and 16 AI crawler bots.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            robots_txt: { type: "string", description: "Full robots.txt content" },
+            path: { type: "string", description: "Specific path to test (e.g. /api/v1 or /blog)" },
+            user_agent: { type: "string", description: "User-Agent to test (default Googlebot)" },
+            sample_paths: { type: "array", items: { type: "string" }, description: "List of sample paths for full AI bot compliance audit" },
+          },
+          required: ["robots_txt"],
+        },
+      },
+      {
+        name: "seoforge_trace_redirects",
+        description: "Ahrefs & Screaming Frog Redirect Tracer: Traces multi-hop redirect chains, detects loops, calculates PageRank link equity dissipation, and generates direct 1-hop rewrite rules.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "Starting URL to trace live or inspect" },
+            hops: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  url: { type: "string" },
+                  status: { type: "number" },
+                },
+                required: ["url", "status"],
+              },
+            },
+            target_framework: { type: "string", enum: ["nextjs", "nginx", "apache", "cloudflare"], description: "Framework for direct rewrite rule generation" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "seoforge_pagespeed_lab",
+        description: "Lighthouse & Semrush Site Audit PageSpeed Lab: Analyzes DOM element complexity, render-blocking scripts and stylesheets, CLS layout stability, and payload budgets from HTML.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "URL of the page" },
+            html: { type: "string", description: "HTML content to analyze" },
+            ttfb_ms: { type: "number", description: "Time to First Byte in milliseconds" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "seoforge_ci_gate",
+        description: "Evaluate strict CI/CD quality gate rules for GitHub Actions / GitLab CI. Checks maximum error/warning thresholds, minimum AEO score, and broken URLs, returning pass/fail and markdown PR comments.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID to evaluate (defaults to latest crawl if omitted)" },
+            max_errors: { type: "number", description: "Max allowed critical errors (default 0)" },
+            max_warnings: { type: "number", description: "Max allowed warnings (default 10)" },
+            min_aeo_score: { type: "number", description: "Minimum average AEO score (default 70)" },
+          },
         },
       },
       {
@@ -1243,6 +1456,170 @@ export function createMcpServer(): Server {
           sources_csv: path.join(outDir, "sources.csv"),
           next_step: "Candidates are unverified leads. Verify with seoforge_reputation_report (target_url + brand + these URLs).",
         });
+      }
+
+            /* ------------------------------------------------------------ */
+      if (name === "seoforge_crawl_diff") {
+        const base = await loadFullResult(args?.base_crawl_id as string);
+        const target = await loadFullResult(args?.target_crawl_id as string);
+        if (!base) return err(`Base crawl '${args?.base_crawl_id}' not found.`);
+        if (!target) return err(`Target crawl '${args?.target_crawl_id}' not found.`);
+        const diff = compareCrawls(base, target);
+        return ok({ diff, markdown: formatCrawlDiffMarkdown(diff) });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_log_audit") {
+        let rawLog = args?.log_content as string | undefined;
+        if (!rawLog && args?.log_path) {
+          rawLog = await fs.readFile(args.log_path as string, "utf-8");
+        }
+        if (!rawLog) return err("Provide either log_content or log_path.");
+        let knownPages: Array<{ url: string; status: number; isIndexable: boolean }> | undefined;
+        if (args?.crawl_id) {
+          const c = await loadFullResult(args.crawl_id as string);
+          if (c) knownPages = c.pages.map((p) => ({ url: p.url, status: p.status, isIndexable: p.isIndexable }));
+        }
+        const report = analyzeLogs(rawLog, { knownPages });
+        return ok(report);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_cannibalization") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        let crawl: CrawlResult | null = null;
+        if (args?.crawl_id) crawl = repo.getFullCrawl(db, args.crawl_id as string);
+        else {
+          const latest = repo.listCrawls(db, 1)[0];
+          if (latest) crawl = repo.getFullCrawl(db, latest.id);
+        }
+        if (!crawl) return err("Crawl not found. Run a crawl first or pass crawl_id.");
+        const report = detectCannibalization(crawl.pages);
+        return ok(report);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_custom_extract") {
+        let html = args?.html as string | undefined;
+        if (!html && args?.url) {
+          const res = await fetchPage(args.url as string, { timeoutMs: 10000 });
+          html = res.html;
+        }
+        if (!html) return err("Provide html content or a fetchable url.");
+        const extractions = extractCustomFields(html, (args?.rules || []) as CustomExtractorRule[]);
+        return ok({ extractions });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_score_content") {
+        const report = scoreContent({
+          body: args?.body as string,
+          primaryKeyword: args?.primary_keyword as string,
+          title: args?.title as string | undefined,
+          secondaryKeywords: args?.secondary_keywords as string[] | undefined,
+          targetWordCount: numArg(args?.target_word_count),
+        });
+        return ok(report);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_patch_codebase") {
+        const patch = generateCodePatch({
+          sourceCode: args?.source_code as string,
+          issueId: args?.issue_id as string,
+          filePath: args?.file_path as string | undefined,
+          fixData: (args?.fix_data || {}) as any,
+        });
+        return ok(patch);
+      }
+
+      /* ------------------------------------------------------------ */
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_link_intersect") {
+        const report = analyzeLinkIntersect({
+          targetDomain: String(args?.target_domain || ""),
+          targetBacklinks: args?.target_backlinks as string[] | undefined,
+          competitors: (args?.competitors as any[]) || [],
+          minCompetitorOverlap: numArg(args?.min_competitor_overlap),
+        });
+        return ok(report);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_content_gap") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const base = repo.getFullCrawl(db, String(args?.baseline_crawl_id || ""));
+        if (!base) return err("Baseline crawl not found");
+        const compIds = (args?.competitor_crawl_ids as string[]) || [];
+        const comps: CrawlResult[] = [];
+        for (const cid of compIds) {
+          const c = repo.getFullCrawl(db, cid);
+          if (c) comps.push(c);
+        }
+        if (comps.length === 0) return err("No competitor crawls found for given IDs");
+        const report = analyzeContentGap(base, comps);
+        return ok(report);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_robots_test") {
+        const robotsTxt = String(args?.robots_txt || "");
+        if (args?.path) {
+          const res = testRobotsPath(robotsTxt, String(args.path), String(args.user_agent || "Googlebot"));
+          return ok(res);
+        }
+        const samplePaths = (args?.sample_paths as string[]) || ["/", "/blog", "/pricing", "/api", "/docs"];
+        const audit = auditRobotsAiCompliance(robotsTxt, samplePaths);
+        return ok(audit);
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_trace_redirects") {
+        let hops: Array<{ url: string; status: number }> = (args?.hops as any[]) || [];
+        if (hops.length === 0 && args?.url) {
+          const res = await fetchPage(String(args.url), { followRedirects: true, maxRedirects: 10 });
+          hops = res.redirectChain.map((u, i) => ({
+            url: u,
+            status: i === 0 && res.redirectStatusCode ? res.redirectStatusCode : i === res.redirectChain.length - 1 ? res.status : 301,
+          }));
+        }
+        const analysis = analyzeRedirectChain(hops);
+        const code = generateDirectRedirectCode(analysis.initialUrl, analysis.finalUrl, args?.target_framework as any || "nextjs");
+        return ok({ ...analysis, directRewriteSnippet: code });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_pagespeed_lab") {
+        let html = String(args?.html || "");
+        let ttfb = numArg(args?.ttfb_ms);
+        if (!html && args?.url) {
+          const fetched = await fetchPage(String(args.url));
+          html = fetched.html;
+          ttfb = ttfb ?? fetched.ttfbMs;
+        }
+        const lab = analyzePageSpeedLab({
+          url: String(args?.url || ""),
+          html,
+          ttfbMs: ttfb,
+        });
+        return ok(lab);
+      }
+
+      if (name === "seoforge_ci_gate") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        let crawl: CrawlResult | null = null;
+        if (args?.crawl_id) crawl = repo.getFullCrawl(db, args.crawl_id as string);
+        else {
+          const latest = repo.listCrawls(db, 1)[0];
+          if (latest) crawl = repo.getFullCrawl(db, latest.id);
+        }
+        if (!crawl) return err("Crawl not found. Run a crawl first or pass crawl_id.");
+        const gate = evaluateCiGate(crawl, {
+          maxErrors: numArg(args?.max_errors),
+          maxWarnings: numArg(args?.max_warnings),
+          minAeoScore: numArg(args?.min_aeo_score),
+        });
+        return ok(gate);
       }
 
       return err(`Unknown tool '${name}'`);

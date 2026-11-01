@@ -26,8 +26,12 @@ import { linkChecks } from "./links.js";
 import { imageChecks } from "./images.js";
 import { performanceChecks } from "./performance.js";
 import { technicalChecks } from "./technical.js";
+import { securityChecks } from "./security.js";
 import { schemaChecks } from "./schema.js";
 import { aeoChecks } from "./aeo.js";
+import { documentChecks } from "./document.js";
+import { urlChecks } from "./url.js";
+import { accessibilityChecks } from "./accessibility.js";
 
 export type { Thresholds } from "../types.js";
 import type { Thresholds } from "../types.js";
@@ -35,8 +39,12 @@ import type { Thresholds } from "../types.js";
 export interface PageMeta {
   title?: string;
   titleLength?: number;
+  titleCount?: number;
+  titleOutsideHead?: boolean;
   description?: string;
   descriptionLength?: number;
+  descriptionCount?: number;
+  descriptionOutsideHead?: boolean;
   canonical?: string;
   canonicalMatches: boolean;
   isSpaCanonicalValid?: boolean;
@@ -87,11 +95,15 @@ export interface PageCheckContext {
   expectedEntities: string[];
   canonicalPolicy: CanonicalPolicy;
   cwv?: CoreWebVitals;
+  /** Raw response byte length (Content-Length or measured). Used for payload budgets. */
+  contentLengthBytes?: number;
   sitemapUrls: Set<string>;
   sourceUrl?: string;
   meta: PageMeta;
   isRedirect: boolean;
   redirectChain: string[];
+  /** First-hop HTTP status that produced the redirect (301/302/307/308). */
+  redirectStatusCode?: number;
   isHttpToHttpsRedirect: boolean;
 }
 
@@ -139,7 +151,13 @@ export function extractPageMeta(
   const $ = cheerio.load(html);
 
   const title = $("title").first().text().trim();
+  const titleCount = $("title").length;
+  const titleOutsideHead =
+    titleCount > 0 && $("head title").length === 0;
   const description = $('meta[name="description"]').attr("content")?.trim();
+  const descriptionCount = $('meta[name="description"]').length;
+  const descriptionOutsideHead =
+    descriptionCount > 0 && $('head meta[name="description"]').length === 0;
 
   const canonical = $('link[rel="canonical"]').attr("href")?.trim();
   const normRequested = normalizeForCompare(finalUrl || pageUrl);
@@ -208,8 +226,12 @@ export function extractPageMeta(
   return {
     title,
     titleLength: title.length,
+    titleCount,
+    titleOutsideHead,
     description,
     descriptionLength: description?.length,
+    descriptionCount,
+    descriptionOutsideHead,
     canonical,
     canonicalMatches,
     isSpaCanonicalValid,
@@ -255,6 +277,10 @@ registerCheck("links", linkChecks);
 registerCheck("images", imageChecks);
 registerCheck("performance", performanceChecks);
 registerCheck("technical", technicalChecks);
+registerCheck("security", securityChecks);
+registerCheck("document", documentChecks);
+registerCheck("url", urlChecks);
+registerCheck("accessibility", accessibilityChecks);
 registerCheck("schema", schemaChecks);
 registerCheck("aeo", aeoChecks);
 
@@ -306,6 +332,10 @@ export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckRes
 function emptyPageMeta(expectedEntities: string[]): PageMeta {
   return {
     canonicalMatches: false,
+    titleCount: 0,
+    titleOutsideHead: false,
+    descriptionCount: 0,
+    descriptionOutsideHead: false,
     h1Count: 0,
     h2Count: 0,
     wordCount: 0,

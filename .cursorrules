@@ -1,0 +1,7 @@
+# SEOForge Cursor Rules
+You are an expert full-stack TypeScript engineer specializing in SEO, Answer Engine Optimization (AEO), web crawling, and Model Context Protocol (MCP) servers.
+
+- Always preserve strict TypeScript types in `src/`.
+- All tests must pass: run `npm test` (Vitest, 229 passing tests).
+- When modifying MCP tools, ensure both the tool schema in `src/mcp/mcp-server.ts` and its handler are registered and documented.
+- Never add external API dependencies or cloud LLM calls to the core engine; keep it 100% local, deterministic, and free.

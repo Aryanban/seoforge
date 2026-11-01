@@ -6,10 +6,16 @@ import { LinkInfo, ImageInfo } from "../types.js";
 
 const SKIP_PROTOCOLS = ["javascript:", "mailto:", "tel:", "data:", "blob:", "vbscript:"];
 
+export interface HreflangPair {
+  lang: string;
+  href: string;
+}
+
 export interface ExtractedLinks {
   links: LinkInfo[];
   internalTargets: string[];
   externalTargets: string[];
+  hreflang: HreflangPair[];
 }
 
 export function extractLinks(html: string, pageUrl: string): ExtractedLinks {
@@ -68,7 +74,18 @@ export function extractLinks(html: string, pageUrl: string): ExtractedLinks {
     else externalTargets.push(resolved.href);
   });
 
-  return { links, internalTargets, externalTargets };
+  const hreflang: HreflangPair[] = [];
+  $("link[rel=\"alternate\"][hreflang]").each((_, el) => {
+    const lang = $(el).attr("hreflang")?.trim();
+    const href = $(el).attr("href")?.trim();
+    if (lang && href) {
+      try {
+        hreflang.push({ lang, href: new URL(href, base.href).href });
+      } catch { hreflang.push({ lang, href }); }
+    }
+  });
+
+  return { links, internalTargets, externalTargets, hreflang };
 }
 
 export function extractImages(html: string, pageUrl: string): ImageInfo[] {

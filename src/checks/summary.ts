@@ -94,6 +94,15 @@ function severityForName(name: string): IssueSeverity {
     n.includes("loop") ||
     n.includes("unreachable") ||
     n.includes("mixed content") ||
+    n.includes("duplicate content") ||
+    n.includes("missing return link") ||
+    n.includes("non-200") ||
+    n.includes("not indexable") ||
+    n.includes("viewport") ||
+    n.includes("discernible text") ||
+    n.includes("accessible name") ||
+    n.includes("language declaration") ||
+    n.includes("labels") ||
     n.includes("error")
   ) {
     return "Error";
@@ -115,8 +124,11 @@ function severityForName(name: string): IssueSeverity {
 
 function categoryForName(name: string): any {
   const n = name.toLowerCase();
-  if (n.includes("canonical") || n.includes("title") || n.includes("description") || n.includes("open graph") || n.includes("twitter") || n.includes("hreflang"))
+  if (n.includes("canonical") || n.includes("title") || n.includes("description") || n.includes("open graph") || n.includes("twitter"))
     return "Meta";
+  if (n.includes("hreflang") || n.includes("x-default") || n.includes("language code")) return "International";
+  if (n.includes("accessible") || n.includes("aria") || n.includes("contrast") || n.includes("skip link") || n.includes("landmark") || n.includes("tabindex") || n.includes("viewport") || n.includes("zoom")) return "Accessibility";
+  if (n.includes("security header") || n.includes("hsts") || n.includes("cookie") || n.includes("mixed content") || n.includes("form submit")) return "Security";
   if (n.includes("h1") || n.includes("heading")) return "Headings";
   if (n.includes("word count") || n.includes("content")) return "Content";
   if (n.includes("link") || n.includes("anchor") || n.includes("orphan")) return "Links";
@@ -158,12 +170,37 @@ export const RECOMMENDATIONS: Record<string, string> = {
   insecure_http_page: "Provision an TLS certificate and serve the site exclusively over HTTPS.",
   noindex_meta_tag: "Remove the noindex directive if the page should be indexed.",
   noindex_x_robots_tag: "Remove the X-Robots-Tag: noindex header if the page should be indexed.",
-  title_missing: "Add a unique, keyword-focused <title> of 15–60 characters.",
-  title_too_long: "Shorten the title to ≤ 60 characters so it is not truncated in search results.",
-  title_too_short: "Expand the title to 15–60 characters including the primary target keyword.",
-  meta_desc_missing: "Write a unique meta description of 70–160 characters summarizing the page's value.",
-  meta_desc_too_long: "Trim the meta description to ≤ 160 characters.",
-  meta_desc_too_short: "Expand the meta description to 70–160 characters with a clear call to action.",
+  title_missing: "Add a unique, keyword-focused <title> of 30–60 characters.",
+  title_too_long: "Shorten the title to ≤ 60 characters / ≤561px so it is not truncated in search results.",
+  title_too_short: "Expand the title to 30–60 characters including the primary target keyword.",
+  title_multiple: "Keep exactly one <title> element inside <head>; remove duplicates.",
+  title_outside_head: "Move the <title> element inside <head>.",
+  title_too_wide: "Shorten or front-load keywords so the title fits ~561px in SERPs.",
+  title_same_as_h1: "Differentiate title and H1 to cover more query variants.",
+  meta_desc_missing: "Write a unique meta description of 70–155 characters summarizing the page's value.",
+  meta_desc_too_long: "Trim the meta description to ≤ 155 characters / ≤985px.",
+  meta_desc_too_short: "Expand the meta description to 70–155 characters with a clear call to action.",
+  meta_desc_multiple: "Keep exactly one meta description inside <head>.",
+  meta_desc_outside_head: "Move the meta description inside <head>.",
+  duplicate_content_exact: "Canonicalise duplicates to one primary URL or rewrite the content to be unique.",
+  duplicate_content_near: "Differentiate near-duplicate pages or consolidate them with canonicals.",
+  redirect_302_temporary: "Switch long-lived temporary redirects to 301/308 so equity consolidates.",
+  redirect_301_permanent: "Update internal links to point directly at the redirect destination.",
+  canonical_cross_domain: "Verify the cross-domain canonical is intentional; otherwise self-canonicalise.",
+  canonical_invalid_url: "Fix the canonical to a valid absolute URL.",
+  ai_search_bot_blocked: "Allow the AI-search crawler in robots.txt unless exclusion is deliberate.",
+  ai_fetcher_blocked: "Allow the assistant fetcher so AI assistants can open site pages on request.",
+  llms_txt_missing: "Publish a /llms.txt index per llmstxt.org so assistants can discover site content.",
+  favicon_missing: "Add a favicon link (and /favicon.ico) to avoid blank tabs and wasted 404s.",
+  html_lang_missing: 'Add lang to <html> (e.g. lang="en" or lang="hi").',
+  charset_missing: 'Declare <meta charset="utf-8"> first in <head> (critical for Indic scripts).',
+  meta_refresh: "Replace meta-refresh with a server-side 301/308 redirect.",
+  page_too_large: "Reduce HTML payload below 2MB: paginate, code-split, defer non-critical JS.",
+  no_cache_validators: "Add ETag or Last-Modified so Googlebot can recrawl conditionally.",
+  url_over_length: "Shorten the URL below 115 characters.",
+  url_session_id: "Strip session/ad-click identifiers from indexable URLs.",
+  mobile_viewport_missing: 'Add <meta name="viewport" content="width=device-width, initial-scale=1">.',
+  h1_too_long_chars: "Shorten the H1 to ≤70 characters.",
   canonical_missing: "Add <link rel='canonical'> pointing to the preferred indexable URL.",
   canonical_mismatch: "Make the canonical tag match the requested URL, or 301 to the canonical version.",
   og_tags_incomplete:

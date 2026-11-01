@@ -66,8 +66,9 @@ describe("check engine", () => {
   it("rewards a well-optimized page with a high AEO score", () => {
     const lead =
       "Example page is an authoritative demonstration property that shows how a well structured document earns a high answer engine optimization score through clear headings, direct answer paragraphs, structured tables, and valid JSON-LD structured data.";
-    const html = `<html><head><title>Example page — well optimized</title>
-      <meta name="description" content="An optimized example page.">
+    const html = `<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Example page — well optimized</title>
+      <link rel="icon" href="/favicon.ico">
+      <meta name="description" content="An optimized example page demonstrating answer-engine-ready structure with tables and FAQ schema.">
       <link rel="canonical" href="https://example.com/page">
       <script type="application/ld+json">{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is this?","acceptedAnswer":{"@type":"Answer","text":"A well optimized page."}}]}</script>
       </head><body>
@@ -107,13 +108,14 @@ describe("check engine", () => {
     expect(ids).toContain("slow_ttfb");
     expect(ids).toContain("high_latency");
     expect(ids).toContain("missing_security_headers");
+    expect(ids).toContain("no_cache_validators");
   });
 
   it("detects mixed content on an HTTPS page", () => {
     const html = `<html><head><title>T</title></head><body><h1>Mixed</h1>
       <script src="http://evil.example/lib.js"></script></body></html>`;
     const { page } = runPageChecks(ctxFor(html, "https://example.com/mixed"));
-    expect(page.auditIssues.some((i) => i.id === "mixed_content")).toBe(true);
+    expect(page.auditIssues.some((i) => i.id === "mixed_content_active")).toBe(true);
   });
 
   it("flags noindex directives", () => {

@@ -1,7 +1,7 @@
 {
   "name": "seoforge",
   "version": "2.0.0",
-  "description": "Screaming Frog-grade local SEO crawler + Ahrefs-grade audit engine + AEO scoring + web dashboard + MCP agent server.",
+  "description": "Screaming Frog-grade local SEO crawler + Ahrefs-grade audit engine + AEO scoring + web dashboard + 35-tool native MCP server for all AI agents.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
@@ -41,7 +41,14 @@
     "google-search-essentials",
     "bing-webmaster",
     "mcp",
-    "autonomous-agent"
+    "mcp-server",
+    "autonomous-agent",
+    "claude-code",
+    "antigravity",
+    "cursor",
+    "codex",
+    "opencode",
+    "gemini"
   ],
   "author": "Aryan Bansal <https://www.webforge.me/>",
   "license": "MIT",

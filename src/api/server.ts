@@ -59,6 +59,19 @@ import {
 } from "../schema-generator.js";
 import { findInternalLinkOpportunities } from "../link-opportunities.js";
 import { analyzeAnchorProfile } from "../anchor-analyzer.js";
+import { compareCrawls, formatCrawlDiffMarkdown } from "../analysis/crawl-diff.js";
+import { analyzeLogs } from "../analysis/log-parser.js";
+import { detectCannibalization } from "../analysis/cannibalization.js";
+import { extractCustomFields, CustomExtractorRule } from "../analysis/custom-extractor.js";
+import { scoreContent } from "../analysis/live-content-scorer.js";
+import { generateCodePatch } from "../analysis/code-patcher.js";
+import { evaluateCiGate } from "../analysis/ci-gate.js";
+import { analyzeLinkIntersect } from "../analysis/link-intersect.js";
+import { analyzeContentGap } from "../analysis/content-gap.js";
+import { testRobotsPath, auditRobotsAiCompliance } from "../analysis/robots-simulator.js";
+import { analyzeRedirectChain, generateDirectRedirectCode } from "../analysis/redirect-tracer.js";
+import { analyzePageSpeedLab } from "../analysis/pagespeed-lab.js";
+import { fetchPage } from "../crawl/fetcher.js";
 import {
   classifySearchIntent,
   estimateKeywordDifficulty,
@@ -726,6 +739,210 @@ export function createServer(options: ServerOptions = {}): Hono {
     const result = repo.getDiscoveryRun(db, c.req.param("id"));
     if (!result) return c.json({ error: "Discovery run not found" }, 404);
     return c.json({ result, markdown: discoveryMarkdown(result) });
+  });
+
+
+  /* ---------------------------------------------------------------- */
+  /* Competitive Superpower Endpoints (Diff, Logs, Cannibalization,  */
+  /* Live Content Scorer, Codebase Patcher, CI Gate)                 */
+  /* ---------------------------------------------------------------- */
+
+  app.post("/api/diff", async (c) => {
+    try {
+      const body = await c.req.json();
+      const baseId = body.baseCrawlId;
+      const targetId = body.targetCrawlId;
+      if (!baseId || !targetId) return c.json({ error: "baseCrawlId and targetCrawlId are required" }, 400);
+      const base = completed.get(baseId) || repo.getFullCrawl(db, baseId);
+      const target = completed.get(targetId) || repo.getFullCrawl(db, targetId);
+      if (!base) return c.json({ error: `Base crawl '${baseId}' not found` }, 404);
+      if (!target) return c.json({ error: `Target crawl '${targetId}' not found` }, 404);
+      const diff = compareCrawls(base, target);
+      return c.json({ diff, markdown: formatCrawlDiffMarkdown(diff) });
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/logs/audit", async (c) => {
+    try {
+      const body = await c.req.json();
+      const logContent = body.logContent;
+      if (!logContent) return c.json({ error: "logContent is required" }, 400);
+      let knownPages: Array<{ url: string; status: number; isIndexable: boolean }> | undefined;
+      if (body.crawlId) {
+        const crawl = completed.get(body.crawlId) || repo.getFullCrawl(db, body.crawlId);
+        if (crawl) knownPages = crawl.pages.map((p) => ({ url: p.url, status: p.status, isIndexable: p.isIndexable }));
+      }
+      const report = analyzeLogs(logContent, { knownPages });
+      return c.json(report);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.get("/api/crawls/:id/cannibalization", (c) => {
+    const crawlId = c.req.param("id");
+    const crawl = completed.get(crawlId) || repo.getFullCrawl(db, crawlId);
+    if (!crawl) return c.json({ error: "Crawl not found" }, 404);
+    const report = detectCannibalization(crawl.pages);
+    return c.json(report);
+  });
+
+  app.post("/api/content/score", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.body || !body.primaryKeyword) {
+        return c.json({ error: "body and primaryKeyword are required" }, 400);
+      }
+      const report = scoreContent({
+        body: body.body,
+        primaryKeyword: body.primaryKeyword,
+        title: body.title,
+        secondaryKeywords: body.secondaryKeywords,
+        targetWordCount: body.targetWordCount,
+      });
+      return c.json(report);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/codebase/patch", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.sourceCode || !body.issueId || !body.fixData) {
+        return c.json({ error: "sourceCode, issueId, and fixData are required" }, 400);
+      }
+      const patch = generateCodePatch({
+        sourceCode: body.sourceCode,
+        issueId: body.issueId,
+        filePath: body.filePath,
+        fixData: body.fixData,
+      });
+      return c.json(patch);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/link-intersect", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.targetDomain || !body.competitors) {
+        return c.json({ error: "targetDomain and competitors are required" }, 400);
+      }
+      const report = analyzeLinkIntersect({
+        targetDomain: body.targetDomain,
+        targetBacklinks: body.targetBacklinks,
+        competitors: body.competitors,
+        minCompetitorOverlap: body.minCompetitorOverlap,
+      });
+      return c.json(report);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/content-gap", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.baselineCrawlId || !body.competitorCrawlIds) {
+        return c.json({ error: "baselineCrawlId and competitorCrawlIds are required" }, 400);
+      }
+      const base = completed.get(body.baselineCrawlId) || repo.getFullCrawl(db, body.baselineCrawlId);
+      if (!base) return c.json({ error: "Baseline crawl not found" }, 404);
+
+      const comps: CrawlResult[] = [];
+      for (const cid of body.competitorCrawlIds) {
+        const crawl = completed.get(cid) || repo.getFullCrawl(db, cid);
+        if (crawl) comps.push(crawl);
+      }
+      if (comps.length === 0) return c.json({ error: "No competitor crawls found" }, 404);
+
+      const report = analyzeContentGap(base, comps);
+      return c.json(report);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/robots/test", async (c) => {
+    try {
+      const body = await c.req.json();
+      if (!body.robotsTxt) return c.json({ error: "robotsTxt is required" }, 400);
+      if (body.path) {
+        const res = testRobotsPath(body.robotsTxt, body.path, body.userAgent || "Googlebot");
+        return c.json(res);
+      }
+      const samplePaths = body.samplePaths || ["/", "/blog", "/pricing", "/api", "/docs"];
+      const audit = auditRobotsAiCompliance(body.robotsTxt, samplePaths);
+      return c.json(audit);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/redirects/trace", async (c) => {
+    try {
+      const body = await c.req.json();
+      let hops = body.hops || [];
+      if (hops.length === 0 && body.url) {
+        const fetched = await fetchPage(body.url, { followRedirects: true, maxRedirects: 10 });
+        hops = fetched.redirectChain.map((u: string, idx: number) => ({
+          url: u,
+          status: idx === 0 && fetched.redirectStatusCode ? fetched.redirectStatusCode : idx === fetched.redirectChain.length - 1 ? fetched.status : 301,
+        }));
+      }
+      const analysis = analyzeRedirectChain(hops);
+      const code = generateDirectRedirectCode(analysis.initialUrl, analysis.finalUrl, body.framework || "nextjs");
+      return c.json({ ...analysis, directRewriteSnippet: code });
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/pagespeed/lab", async (c) => {
+    try {
+      const body = await c.req.json();
+      let html = body.html || "";
+      let ttfb = body.ttfbMs;
+      if (!html && body.url) {
+        const fetched = await fetchPage(body.url);
+        html = fetched.html;
+        ttfb = ttfb ?? fetched.ttfbMs;
+      }
+      const report = analyzePageSpeedLab({
+        url: body.url || "",
+        html,
+        ttfbMs: ttfb,
+      });
+      return c.json(report);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
+  });
+
+  app.post("/api/ci/gate", async (c) => {
+    try {
+      const body = await c.req.json();
+      let crawl: CrawlResult | null = null;
+      if (body.crawlId) {
+        crawl = completed.get(body.crawlId) || repo.getFullCrawl(db, body.crawlId);
+      } else {
+        const latest = repo.listCrawls(db, 1)[0];
+        if (latest) crawl = completed.get(latest.id) || repo.getFullCrawl(db, latest.id);
+      }
+      if (!crawl) return c.json({ error: "Crawl not found" }, 404);
+      const gate = evaluateCiGate(crawl, {
+        maxErrors: body.maxErrors,
+        maxWarnings: body.maxWarnings,
+        minAeoScore: body.minAeoScore,
+      });
+      return c.json(gate);
+    } catch (err: any) {
+      return c.json({ error: err.message }, 500);
+    }
   });
 
   /* ---------------------------------------------------------------- */

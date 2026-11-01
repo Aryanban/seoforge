@@ -37,6 +37,17 @@ export function headingChecks(ctx: PageCheckContext): CheckOutput {
         details: { count: meta.h1Count },
       });
     }
+    if (meta.h1Text && meta.h1Text.length > 70) {
+      issues.push({
+        id: "h1_too_long_chars",
+        name: "H1 tag too long (>70 characters)",
+        severity: "Notice",
+        category: "Headings",
+        message: `H1 is ${meta.h1Text.length} characters. Screaming Frog flags H1s over 70 characters; keep the primary heading concise.`,
+        url: pageUrl,
+        details: { length: meta.h1Text.length, h1: meta.h1Text },
+      });
+    }
     const words = (meta.h1Text || "").split(/\s+/).filter(Boolean).length;
     if (words > H1_MAX_WORDS) {
       issues.push({

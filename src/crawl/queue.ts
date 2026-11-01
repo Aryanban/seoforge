@@ -1,3 +1,4 @@
+import { isCrawlTrapLoop } from "../analysis/url-normalizer.js";
 /**
  * Prioritized, de-duplicated BFS crawl queue with per-URL depth tracking.
  */
@@ -22,6 +23,7 @@ export class CrawlQueue {
    * Returns true if the URL was newly queued.
    */
   enqueue(url: string, normalizedUrl: string, depth: number, source?: string): boolean {
+    if (isCrawlTrapLoop(url)) return false;
     if (this.seen.has(normalizedUrl)) return false;
     if (depth > this.maxDepth) return false;
     if (this.enqueuedCount >= this.limit) return false;

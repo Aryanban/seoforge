@@ -1,60 +1,20 @@
 /**
- * Technical checks — mixed content, security headers, compression.
+ * Technical checks — mixed content (now delegated to the security module for
+ * active/passive classification), compression, HTTP version, and transport.
+ *
+ * NOTE: mixed_content detection moved to src/checks/security.ts, which splits
+ * it into mixed_content_active (Error, blocked by browsers) and
+ * mixed_content_passive (Warning) per Sitebulb/SF parity. This module keeps a
+ * legacy aggregate guard only when the security module is disabled.
  */
 import { AuditIssue } from "../types.js";
 import { PageCheckContext, CheckOutput } from "./registry.js";
 
-const SECURITY_HEADERS: Record<string, string> = {
-  "content-security-policy": "Content-Security-Policy (CSP)",
-  "strict-transport-security": "Strict-Transport-Security (HSTS)",
-  "x-content-type-options": "X-Content-Type-Options",
-  "x-frame-options": "X-Frame-Options",
-  "referrer-policy": "Referrer-Policy",
-};
-
 export function technicalChecks(ctx: PageCheckContext): CheckOutput {
   const issues: AuditIssue[] = [];
-  const { headers, pageUrl, status, html } = ctx;
+  const { headers, pageUrl, status, html, options } = ctx;
 
   if (status === 0) return { issues };
-
-  // Mixed content: insecure resources on a secure page
-  if (pageUrl.startsWith("https://") && html) {
-    const insecure = [
-      ...(html.match(/<script[^>]+src=["']http:\/\//gi) || []),
-      ...(html.match(/<link[^>]+href=["']http:\/\//gi) || []),
-      ...(html.match(/<img[^>]+src=["']http:\/\//gi) || []),
-      ...(html.match(/<iframe[^>]+src=["']http:\/\//gi) || []),
-    ];
-    if (insecure.length > 0) {
-      issues.push({
-        id: "mixed_content",
-        name: "Mixed content on HTTPS page",
-        severity: "Error",
-        category: "Technical",
-        message: `${insecure.length} resource(s) are loaded over insecure HTTP on an HTTPS page. Browsers block or downgrade these.`,
-        url: pageUrl,
-        details: { count: insecure.length },
-      });
-    }
-  }
-
-  // Missing security headers
-  const missing: string[] = [];
-  for (const [header, label] of Object.entries(SECURITY_HEADERS)) {
-    if (!headers[header]) missing.push(label);
-  }
-  if (missing.length >= 3) {
-    issues.push({
-      id: "missing_security_headers",
-      name: "Missing security headers",
-      severity: "Notice",
-      category: "Technical",
-      message: `Response is missing security headers: ${missing.join(", ")}.`,
-      url: pageUrl,
-      details: { missing },
-    });
-  }
 
   // Compression
   const encoding = headers["content-encoding"] || "";
@@ -69,6 +29,23 @@ export function technicalChecks(ctx: PageCheckContext): CheckOutput {
       details: { bytes: html.length },
     });
   }
+
+  // Weak compression: gzip on large payloads where brotli would save ~15-20%
+  if (encoding === "gzip" && html && html.length > 100 * 1024 && status === 200) {
+    issues.push({
+      id: "compression_not_brotli",
+      name: "gzip used instead of Brotli",
+      severity: "Notice",
+      category: "Performance",
+      message: `Response uses gzip on a ~${Math.round(html.length / 1024)}KB payload. Brotli (br) typically saves another 15–20% — meaningful on Indian mobile networks.`,
+      url: pageUrl,
+      details: { encoding, bytes: html.length },
+    });
+  }
+
+  // HTTP protocol version is visible to render-mode; for raw fetch Node
+  // negotiates transparently. Record informational guidance instead of a flag.
+  void options;
 
   return { issues };
 }

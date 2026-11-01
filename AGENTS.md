@@ -152,7 +152,34 @@ command = "node"
 args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 ```
 
-### The 18 MCP tools
+**Google Antigravity (AGY)** (`~/.gemini/antigravity/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "seoforge": {
+      "command": "node",
+      "args": ["/absolute/path/to/seoforge/dist/cli.js", "mcp"],
+      "env": { "NODE_ENV": "production" }
+    }
+  }
+}
+```
+
+**Cursor / Windsurf** (`.cursor/mcp.json` / `~/.codeium/windsurf/mcp_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "seoforge": {
+      "command": "node",
+      "args": ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
+    }
+  }
+}
+```
+
+### The 35 Native MCP Tools
 
 | Tool | Purpose |
 | --- | --- |
@@ -165,15 +192,32 @@ args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 | `seoforge_sitemap_report` | Sitemap validity + orphan-in-sitemap |
 | `seoforge_export_report` | md / csv / html export into `reports/` |
 | `seoforge_inspect_url` | Live single-URL inspection (+render) |
-| `seoforge_submit_indexnow` | IndexNow dispatch to Bing/Yandex |
+| `seoforge_submit_indexnow` | IndexNow dispatch to Bing, Yandex, and Naver |
 | `seoforge_sample_sitemap` | Audit N random deep sitemap routes |
 | `seoforge_check_llms_txt` | `/llms.txt` + `/llms-full.txt` validation |
 | `seoforge_generate_aeo_snippet` | Inverted-pyramid answer paragraph + FAQ JSON-LD |
-| `seoforge_publishing_plan` | Tailored posting plan from the 206-source catalog (or catalog browse). Deterministic, no network. |
-| `seoforge_reputation_report` | Verify candidate source URLs + model-1.1 reputation score (conservative: low-confidence cap 49/100) |
-| `seoforge_discover_sources` | Collect unverified leads from bounded search / saved HTML / supplied URLs → feeds `seoforge_reputation_report` |
+| `seoforge_publishing_plan` | Tailored posting plan from the 206-source catalog |
+| `seoforge_reputation_report` | Verify candidate source URLs + model-1.1 reputation score |
+| `seoforge_discover_sources` | Collect unverified leads from bounded search / saved HTML |
 | `seoforge_compare_competitors` | Competitor gap matrix from stored crawls or live URLs |
 | `seoforge_daily_run` | Full daily routine: audit + report + IndexNow |
+| `seoforge_analyze_content` | Flesch readability, word counts, heading hierarchy, keyword density |
+| `seoforge_generate_schema` | Automated Schema.org JSON-LD generation (Article, FAQ, Product, LocalBusiness) |
+| `seoforge_link_opportunities` | Unlinked target keyword mentions across internal pages |
+| `seoforge_keyword_intelligence` | Search intent classification, term frequencies, TF-IDF scoring |
+| `seoforge_crawl_diff` | Git-style crawl diffing & SEO regression detection |
+| `seoforge_log_audit` | Server log audit (Googlebot hit frequency vs wasted crawl budget) |
+| `seoforge_cannibalization` | Detect competing URLs targeting identical keyword intent |
+| `seoforge_custom_extract` | Extract arbitrary data using CSS selectors, XPath, or Regex |
+| `seoforge_score_content` | Real-time content grade & SEO optimization scoring |
+| `seoforge_patch_codebase` | Surgical AST-based code patcher for Next.js, HTML, Astro |
+| `seoforge_link_intersect` | Common backlink opportunities and competitor domain overlap |
+| `seoforge_content_gap` | Keyword and topic gap vs top competitor URLs |
+| `seoforge_robots_test` | RFC 9309 simulation & AI crawler (GPTBot, ClaudeBot) permission check |
+| `seoforge_trace_redirects` | Trace complete redirect hops, status codes, and loop risks |
+| `seoforge_pagespeed_lab` | Local lab Core Web Vitals (LCP, CLS, INP, TTFB) estimator |
+| `seoforge_ci_gate` | Enforce zero-regression thresholds in GitHub Actions & CI |
+| `seoforge_anchor_profile` | Anchor text distribution & Google Penguin risk profiling |
 
 **Agent ergonomics:** every tool returns structured JSON and returns errors as
 `{ "error": … }` instead of throwing — recover programmatically. Crawls persist to SQLite,

@@ -92,7 +92,7 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
     isHttpToHttpsRedirect = raw.requestedUrl.startsWith("http://") && raw.finalUrl.startsWith("https://");
   }
 
-  const links = html ? extractLinks(html, finalUrl) : { links: [], internalTargets: [], externalTargets: [] };
+  const links = html ? extractLinks(html, finalUrl) : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };
   const images = html ? extractImages(html, finalUrl) : [];
 
   const { page, issues } = runPageChecks({

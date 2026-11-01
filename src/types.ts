@@ -17,7 +17,10 @@ export type IssueCategory =
   | "Performance"
   | "StructuredData"
   | "AEO"
-  | "Technical";
+  | "Technical"
+  | "Accessibility"
+  | "Security"
+  | "International";
 
 export interface AuditIssue {
   id: string;
@@ -82,6 +85,15 @@ export interface CrawlOptions {
   paths?: string[];
   sitemapOverride?: string;
   seedUrls?: string[];
+  /** Custom Extraction rules (Screaming Frog parity: CSS, XPath, Regex) */
+  customExtractors?: Array<{
+    id: string;
+    name: string;
+    type: "css" | "xpath" | "regex";
+    selector: string;
+    attribute?: string;
+    extractAll?: boolean;
+  }>;
 }
 
 export interface Thresholds {
@@ -258,6 +270,8 @@ export interface PageAuditResult {
   ttfbMs?: number;
   depth: number;
   rendered: boolean;
+  /** Clean visible body text (scripts/nav/footer stripped). Powers duplicate detection. */
+  bodyText?: string;
   canonical?: string;
   canonicalMatches: boolean;
   isSpaCanonicalValid?: boolean;
@@ -301,6 +315,8 @@ export interface PageAuditResult {
   schema: SchemaValidationResult;
   aeo: AeoScoreResult;
   cwv?: CoreWebVitals;
+  /** Screaming Frog parity custom scraper extractions */
+  customExtractions?: Record<string, string[]>;
   issues: string[]; // formatted "[Severity] name" for back-compat
   auditIssues: AuditIssue[];
 }

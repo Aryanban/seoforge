@@ -22,3 +22,4 @@ reports/.snapshots/
 # Local config / secrets
 .env
 seoforge.config.local.json
+.scratch/

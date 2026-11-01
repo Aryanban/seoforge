@@ -1,0 +1,21 @@
+{
+  "name": "seoforge",
+  "version": "2.0.0",
+  "description": "Screaming Frog + Ahrefs–grade technical crawler, 35-tool MCP server, AEO engine, and IndexNow protocol engine.",
+  "author": {
+    "name": "Aryan Bansal",
+    "url": "https://github.com/Aryanban"
+  },
+  "repository": "https://github.com/Aryanban/seoforge",
+  "license": "MIT",
+  "keywords": [
+    "seo",
+    "aeo",
+    "crawler",
+    "screaming-frog",
+    "ahrefs",
+    "indexnow",
+    "schema",
+    "mcp"
+  ]
+}
