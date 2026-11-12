@@ -18,8 +18,8 @@ export interface ExtractedLinks {
   hreflang: HreflangPair[];
 }
 
-export function extractLinks(html: string, pageUrl: string): ExtractedLinks {
-  const $ = cheerio.load(html);
+export function extractLinks(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl: string): ExtractedLinks {
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
   const links: LinkInfo[] = [];
   const internalTargets: string[] = [];
   const externalTargets: string[] = [];
@@ -88,8 +88,8 @@ export function extractLinks(html: string, pageUrl: string): ExtractedLinks {
   return { links, internalTargets, externalTargets, hreflang };
 }
 
-export function extractImages(html: string, pageUrl: string): ImageInfo[] {
-  const $ = cheerio.load(html);
+export function extractImages(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl: string): ImageInfo[] {
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
   const images: ImageInfo[] = [];
 
   let base: URL;
@@ -136,11 +136,31 @@ export function extractImages(html: string, pageUrl: string): ImageInfo[] {
   return images;
 }
 
-export function extractVisibleText(html: string): string {
-  const $ = cheerio.load(html);
-  $("script, style, noscript, svg, link, meta, template").remove();
-  return $("body").text().replace(/\s+/g, " ").trim();
+export function extractVisibleText(htmlOrCheerio: string | cheerio.CheerioAPI): string {
+  if (typeof htmlOrCheerio === "string") {
+    const $ = cheerio.load(htmlOrCheerio);
+    $("script, style, noscript, svg, link, meta, template").remove();
+    return $("body").text().replace(/\s+/g, " ").trim();
+  }
+  // Non-mutating walk (no DOM clone) + per-document cache: the crawler and the
+  // word-count check both ask for this text, so it is computed once per page.
+  const cached = visibleTextCache.get(htmlOrCheerio);
+  if (cached !== undefined) return cached;
+  const parts: string[] = [];
+  const walk = (nodes: any[]): void => {
+    for (const node of nodes) {
+      if (node.type === "text") parts.push(node.data);
+      else if (node.children && !VISIBLE_TEXT_SKIP.has(String(node.name).toLowerCase())) walk(node.children);
+    }
+  };
+  walk(htmlOrCheerio("body").toArray().flatMap((b: any) => b.children ?? []));
+  const text = parts.join("").replace(/\s+/g, " ").trim();
+  visibleTextCache.set(htmlOrCheerio, text);
+  return text;
 }
+
+const VISIBLE_TEXT_SKIP = new Set(["script", "style", "noscript", "svg", "link", "meta", "template"]);
+const visibleTextCache = new WeakMap<object, string>();
 
 export function countWords(text: string): number {
   return text ? text.split(/\s+/).filter(Boolean).length : 0;

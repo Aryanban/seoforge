@@ -78,6 +78,11 @@ import {
   generateKeywordVariations,
   auditSearchIntentAlignment,
 } from "../keyword-intelligence.js";
+import {
+  timesfmForecast,
+  forecastCrawlTrend,
+  formatTimesfmMarkdown,
+} from "../forecasting/index.js";
 
 interface RunningJob {
   crawler: Crawler;
@@ -280,11 +285,16 @@ export function createServer(options: ServerOptions = {}): Hono {
       job.subscribers.add(send);
       if (job.lastProgress) await stream.writeSSE({ event: "progress", data: JSON.stringify(job.lastProgress) });
 
-      // Keep the connection alive until the crawl finishes.
-      while (jobs.has(crawlId) && job.result === undefined) {
-        await new Promise((r) => setTimeout(r, 500));
-      }
-      job.subscribers.delete(send);
+      // Keep connection open using event-driven notification rather than spin-polling
+      await new Promise<void>((resolve) => {
+        const cleanup = () => {
+          job.subscribers.delete(send);
+          resolve();
+        };
+        job.crawler.once("done", cleanup);
+        c.req.raw.signal.addEventListener("abort", cleanup, { once: true });
+        if (job.result !== undefined || !jobs.has(crawlId)) cleanup();
+      });
     })
   );
 
@@ -386,6 +396,39 @@ export function createServer(options: ServerOptions = {}): Hono {
     const base = completed.get(c.req.param("id")) || repo.getCrawl(db, c.req.param("id"));
     if (!base) return c.json([]);
     return c.json(repo.getTrend(db, base.targetUrl));
+  });
+
+  app.get("/api/crawl/:id/forecast", (c) => {
+    const base = completed.get(c.req.param("id")) || repo.getCrawl(db, c.req.param("id"));
+    if (!base) return c.json({ error: "Crawl not found" }, 404);
+    const metric = (c.req.query("metric") as any) || "aeo";
+    const horizon = parseInt(c.req.query("horizon") || "7", 10) || 7;
+    const freq = (c.req.query("freq") as any) || "crawl";
+    try {
+      const forecast = forecastCrawlTrend(db, base.targetUrl, metric, { horizon, freq });
+      return c.json(forecast);
+    } catch (e: any) {
+      return c.json({ error: e.message }, 400);
+    }
+  });
+
+  app.post("/api/forecast", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.series || !Array.isArray(body.series)) {
+      return c.json({ error: "Missing required 'series' array in body" }, 400);
+    }
+    const horizon = parseInt(body.horizon || "7", 10) || 7;
+    const freq = body.freq || "daily";
+    try {
+      const forecast = timesfmForecast(body.series, {
+        horizon,
+        freq,
+        metricName: body.metric || "Time Series",
+      });
+      return c.json(forecast);
+    } catch (e: any) {
+      return c.json({ error: e.message }, 400);
+    }
   });
 
   /* ---------------------------------------------------------------- */

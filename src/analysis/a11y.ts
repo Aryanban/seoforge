@@ -20,10 +20,10 @@ export interface A11yFinding {
   count?: number;
 }
 
-export function analyzeAccessibility(html: string): A11yFinding[] {
+export function analyzeAccessibility(htmlOrCheerio: string | cheerio.CheerioAPI): A11yFinding[] {
   const findings: A11yFinding[] = [];
-  if (!html) return findings;
-  const $ = cheerio.load(html);
+  if (!htmlOrCheerio) return findings;
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
 
   const badImgs = $("img").filter((_, el) => {
     const alt = $(el).attr("alt");

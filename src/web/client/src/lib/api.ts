@@ -142,6 +142,12 @@ export interface InspectResult {
       incomplete?: boolean;
     };
     coreWebVitals?: { lcp?: number; cls?: number; inp?: number; fcp?: number };
+    schema?: {
+      hasJsonLd: boolean;
+      typesFound: string[];
+      missingExpected?: string[];
+      errors?: string[];
+    };
   };
   issues: { id: string; name: string; severity: "Error" | "Warning" | "Notice"; category: string; message: string }[];
   contentAnalysis?: {

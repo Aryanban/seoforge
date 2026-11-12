@@ -4,6 +4,7 @@
  * verification, and a link-graph pass for orphan / internal-link-score analysis.
  */
 import { EventEmitter } from "events";
+import * as cheerio from "cheerio";
 import {
   AuditIssue,
   CrawlOptions,
@@ -22,7 +23,8 @@ import { fetchRobots, isDisallowed, RobotsCheckResult } from "./robots.js";
 import { parseSitemap } from "./sitemap-parser.js";
 import { fetchPage } from "./fetcher.js";
 import { extractLinks, extractImages, extractVisibleText, ExtractedLinks } from "./link-extractor.js";
-import { renderUrl } from "./renderer.js";
+import { renderUrl, closeSharedBrowser } from "./renderer.js";
+import { agentReachFetch, isAgentReachAvailable } from "./agent-reach.js";
 import { runPageChecks, PageCheckContext } from "../checks/registry.js";
 import { buildIssueSummary } from "../checks/summary.js";
 import { generateRecommendations } from "../ai/recommendations.js";
@@ -58,6 +60,9 @@ export class Crawler extends EventEmitter {
   private lastRequestTimes: number[] = [];
   private crawlId: string;
   private rootUrl = "";
+  /** Crawl origin + production origin alias (staging/local audits). */
+  private crawlOrigin = "";
+  private productionOrigin = "";
   /**
    * Fetches currently in flight. New URLs are only discovered by a page that
    * is being fetched, so the crawl is genuinely finished only when the queue
@@ -85,6 +90,9 @@ export class Crawler extends EventEmitter {
     const origin = this.originOf(targetUrl);
     this.startedAt = new Date().toISOString();
     this.rootUrl = normalizeUrl(targetUrl);
+    this.crawlOrigin = this.originOf(targetUrl);
+    this.productionOrigin =
+      opts.productionOrigin && opts.productionOrigin !== this.crawlOrigin ? opts.productionOrigin : "";
 
     this.emitProgress({
       status: "running",
@@ -94,49 +102,58 @@ export class Crawler extends EventEmitter {
       message: `Resolving robots.txt and sitemap for ${origin}…`,
     });
 
-    // 1. robots.txt
-    this.robots = await fetchRobots(`${origin}/robots.txt`);
+    // 1. Initial probes in parallel: robots.txt + llms.txt endpoints
+    const [robotsRes, llmsProbe, llmsFullProbe, llmsRes] = await Promise.all([
+      fetchRobots(`${origin}/robots.txt`),
+      this.probe(`${origin}/llms.txt`),
+      this.probe(`${origin}/llms-full.txt`),
+      fetchPage(`${origin}/llms.txt`, { timeoutMs: 8000, method: "GET" }).catch(() => null),
+    ]);
+    this.robots = robotsRes;
     this.robotsAccessible = this.robots.accessible;
+    this.llmsTxtAccessible = llmsProbe;
+    this.llmsFullTxtAccessible = llmsFullProbe;
+
+    if (llmsRes && llmsRes.status === 200) {
+      try {
+        const llmsResult = validateLlmsTxt({
+          url: `${origin}/llms.txt`,
+          status: llmsRes.status,
+          contentType: llmsRes.contentType,
+          body: llmsRes.html,
+          byteSize: llmsRes.contentLengthBytes,
+        });
+        for (const f of llmsResult.findings) {
+          this.llmsTxtIssues.push({
+            id: f.id,
+            name: f.name,
+            severity: f.severity,
+            category: "AEO",
+            message: f.message,
+            url: `${origin}/llms.txt`,
+          });
+        }
+      } catch {
+        /* llms.txt validation is non-fatal */
+      }
+    }
 
     // 2. sitemap.xml (explicit, from robots directive, or default)
-    const sitemapUrl =
+    const sitemapUrl = this.toCrawlOrigin(
       opts.sitemapOverride ||
       this.robots.sitemaps[0] ||
-      `${origin}/sitemap.xml`;
+      `${origin}/sitemap.xml`
+    );
     if (opts.followSitemap !== false && sitemapUrl) {
       const sitemapResult = await parseSitemap(sitemapUrl, {
         limit: opts.limit ? opts.limit * 20 : 200000,
       });
       this.sitemapAccessible = sitemapResult.accessible;
-      this.sitemapEntries = sitemapResult.entries;
+      this.sitemapEntries = this.productionOrigin
+        ? sitemapResult.entries.map((e) => ({ ...e, url: this.toCrawlOrigin(e.url) }))
+        : sitemapResult.entries;
       this.sitemapUrlCount = sitemapResult.urlCount;
-      this.sitemapUrlSet = new Set(sitemapResult.entries.map((e) => normalizeUrl(e.url)));
-    }
-
-    // 3. llms.txt probes (full validation: spec compliance, not just 200)
-    this.llmsTxtAccessible = await this.probe(`${origin}/llms.txt`);
-    this.llmsFullTxtAccessible = await this.probe(`${origin}/llms-full.txt`);
-    try {
-      const llmsRes = await fetchPage(`${origin}/llms.txt`, { timeoutMs: 8000, method: "GET" });
-      const llmsResult = validateLlmsTxt({
-        url: `${origin}/llms.txt`,
-        status: llmsRes.status,
-        contentType: llmsRes.contentType,
-        body: llmsRes.html,
-        byteSize: llmsRes.contentLengthBytes,
-      });
-      for (const f of llmsResult.findings) {
-        this.llmsTxtIssues.push({
-          id: f.id,
-          name: f.name,
-          severity: f.severity,
-          category: "AEO",
-          message: f.message,
-          url: `${origin}/llms.txt`,
-        });
-      }
-    } catch {
-      /* llms.txt validation is non-fatal */
+      this.sitemapUrlSet = new Set(this.sitemapEntries.map((e) => normalizeUrl(e.url)));
     }
     // 3b. AI-crawler robots posture audit (visibility-loss warnings)
     try {
@@ -236,6 +253,10 @@ export class Crawler extends EventEmitter {
       passed: this.pages.length > 0 && totalErrors === 0,
     };
 
+    if (opts.render) {
+      await closeSharedBrowser().catch(() => {});
+    }
+
     this.emit("done", result);
     return result;
   }
@@ -246,9 +267,10 @@ export class Crawler extends EventEmitter {
     const o = { ...options };
     return {
       maxDepth: o.maxDepth ?? 10,
-      concurrency: o.concurrency ?? 8,
+      concurrency: o.concurrency ?? 12,
       limit: o.limit ?? 1000,
       render: o.render ?? false,
+      reach: o.reach ?? false,
       strategy: (o.strategy ?? "discover") as CrawlStrategy,
       sampleSitemap: o.sampleSitemap ?? 0,
       canonicalPolicy: o.canonicalPolicy ?? "strict",
@@ -256,16 +278,24 @@ export class Crawler extends EventEmitter {
       maxRequestsPerSecond: o.maxRequestsPerSecond ?? 20,
       excludePatterns: o.excludePatterns ?? [],
       checkExternalLinks: o.checkExternalLinks ?? true,
-      externalLinkTimeoutMs: o.externalLinkTimeoutMs ?? 8000,
+      externalLinkTimeoutMs: o.externalLinkTimeoutMs ?? 4000,
       timeoutMs: o.timeoutMs ?? 15000,
       followSitemap: o.followSitemap ?? true,
+      maxRetries: o.maxRetries ?? 2,
       sitemapOverride: o.sitemapOverride,
       expectedEntities: o.expectedEntities ?? [],
       thresholds: o.thresholds,
       paths: o.paths,
       seedUrls: o.seedUrls,
+      productionOrigin: o.productionOrigin,
       customExtractors: o.customExtractors,
     };
+  }
+
+  /** Map a production-origin URL onto the crawl origin (no-op without --production-origin). */
+  private toCrawlOrigin(url: string): string {
+    if (!this.productionOrigin || !url.startsWith(this.productionOrigin)) return url;
+    return this.crawlOrigin + url.slice(this.productionOrigin.length);
   }
 
   private originOf(url: string): string {
@@ -290,7 +320,8 @@ export class Crawler extends EventEmitter {
     const seedEntries: Array<{ url: string; normalizedUrl: string; depth: number }> = [];
 
     if (Array.isArray(opts.seedUrls) && opts.seedUrls.length > 0) {
-      for (const u of opts.seedUrls) {
+      for (const raw of opts.seedUrls) {
+        const u = this.toCrawlOrigin(raw);
         seedEntries.push({ url: u, normalizedUrl: normalizeUrl(u), depth: 0 });
       }
     } else if (opts.strategy === "sitemap") {
@@ -345,12 +376,11 @@ export class Crawler extends EventEmitter {
       const item = queue.dequeue();
 
       // No work right now. New URLs can only be produced by a page currently
-      // being fetched, so if something is in flight we must WAIT for it to
-      // enqueue more — exiting here would strand the other workers and
-      // collapse the crawl to a single concurrent request.
+      // being fetched, so if something is in flight we wait on the event-driven
+      // slot resolver instead of spin-polling.
       if (!item) {
         if (this.activeFetches === 0) return;
-        await new Promise((r) => setTimeout(r, 25));
+        await queue.waitForItem(250);
         continue;
       }
       if (queue.isBudgetExhausted && this.pages.length >= opts.limit) return;
@@ -387,15 +417,35 @@ export class Crawler extends EventEmitter {
         await this.throttle(opts);
 
         const pageData = await this.fetchPageData(item.url, item.depth, opts);
+
+        // Exponential retry with jitter on transient rate limits (HTTP 429 / 503 / connection drops)
+        // Referenced from Apify Crawlee RequestQueue & AWS Architecture backoff standards
+        const isTransient =
+          (pageData.status === 429 || pageData.status === 503 || (pageData.status === 0 && !pageData.errorMessage?.includes("Abort"))) &&
+          !this.stopped;
+        const currentRetries = item.retryCount ?? 0;
+        const maxRetries = opts.maxRetries ?? 2;
+
+        if (isTransient && currentRetries < maxRetries) {
+          const retryAfterSec = parseInt(pageData.headers?.["retry-after"] || "0", 10);
+          const backoffMs = retryAfterSec > 0
+            ? retryAfterSec * 1000
+            : Math.min(8000, 1000 * Math.pow(2, currentRetries) + Math.floor(Math.random() * 500));
+          await new Promise((r) => setTimeout(r, backoffMs));
+          queue.requeue(item);
+          continue;
+        }
+
         queue.markVisited(item.normalizedUrl);
 
-      const links = pageData.html
-        ? extractLinks(pageData.html, pageData.finalUrl)
-        : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };
-      if (links.hreflang.length > 0) this.hreflangPairsByUrl.set(item.url, links.hreflang);
-      const images = pageData.html ? extractImages(pageData.html, pageData.finalUrl) : [];
-      // Clean body text for duplicate detection (stored on the page + hashed sitewide)
-      const bodyText = pageData.html ? extractVisibleText(pageData.html) : "";
+        const $ = pageData.html ? cheerio.load(pageData.html) : null;
+        const links = $
+          ? extractLinks($, pageData.finalUrl)
+          : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };
+        if (links.hreflang.length > 0) this.hreflangPairsByUrl.set(item.url, links.hreflang);
+        const images = $ ? extractImages($, pageData.finalUrl) : [];
+        // Clean body text for duplicate detection (stored on the page + hashed sitewide)
+        const bodyText = $ ? extractVisibleText($) : "";
       this.rawExtractedLinks.push(links);
       this.allImages.push(...images);
 
@@ -411,6 +461,7 @@ export class Crawler extends EventEmitter {
         pageUrl: item.url,
         finalUrl: pageData.finalUrl,
         html: pageData.html,
+        $: $ ?? undefined,
         status: pageData.status,
         responseTimeMs: pageData.responseTimeMs,
         ttfbMs: pageData.ttfbMs,
@@ -454,6 +505,7 @@ export class Crawler extends EventEmitter {
       });
       } finally {
         this.activeFetches--;
+        queue.notifyWaiters();
       }
     }
   }
@@ -507,8 +559,49 @@ export class Crawler extends EventEmitter {
       };
     }
 
-    const raw = await fetchPage(url, { timeoutMs: opts.timeoutMs, method: "GET" });
-    const isHtml = (raw.contentType || "").includes("html") || raw.html.length > 0;
+    let raw = await fetchPage(url, { timeoutMs: opts.timeoutMs, method: "GET" });
+
+    // If reach is explicitly enabled, or if standard fetch failed with 403/429 anti-bot,
+    // attempt scraping via Agent Reach engine
+    if (opts.reach || (opts.reach !== false && (raw.status === 403 || raw.status === 429))) {
+      try {
+        const reachAvailable = await isAgentReachAvailable();
+        if (reachAvailable) {
+          const reachResult = await agentReachFetch(url, { timeoutMs: opts.timeoutMs });
+          if (reachResult.ok && reachResult.html) {
+            return {
+              url,
+              finalUrl: reachResult.finalUrl || url,
+              status: reachResult.status,
+              responseTimeMs: reachResult.responseTimeMs,
+              ttfbMs: reachResult.ttfbMs,
+              depth,
+              isRedirect: reachResult.redirected,
+              redirectChain: reachResult.redirectChain,
+              isHttpToHttpsRedirect: reachResult.requestedUrl.startsWith("http://") && reachResult.finalUrl.startsWith("https://"),
+              html: reachResult.html,
+              rendered: false,
+              headers: reachResult.headers,
+              contentType: reachResult.contentType,
+              contentLengthBytes: reachResult.contentLengthBytes,
+              cwv: undefined,
+              errorMessage: undefined,
+            };
+          }
+        }
+      } catch {
+        // Fall back to raw response
+      }
+    }
+
+    // Trust the declared Content-Type; only sniff markup when none was sent.
+    // (A non-empty CSV/JSON body is not an HTML page and must not be audited as one.)
+    const ct = (raw.contentType || "").toLowerCase();
+    const isHtml = ct ? /html|xhtml/.test(ct) : /^\s*</.test(raw.html);
+    let html = isHtml ? raw.html : "";
+    // Staging/local audits: serve the page as if it were on the production origin, so
+    // canonical/hreflang/og/absolute links resolve same-site instead of host-mismatch noise.
+    if (html && this.productionOrigin) html = html.split(this.productionOrigin).join(this.crawlOrigin);
     return {
       url,
       finalUrl: raw.finalUrl || url,
@@ -519,7 +612,7 @@ export class Crawler extends EventEmitter {
       isRedirect: raw.redirected,
       redirectChain: raw.redirectChain,
       isHttpToHttpsRedirect: raw.requestedUrl.startsWith("http://") && raw.finalUrl.startsWith("https://"),
-      html: isHtml ? raw.html : "",
+      html,
       rendered: false,
       headers: raw.headers,
       contentType: raw.contentType,
@@ -585,13 +678,41 @@ export class Crawler extends EventEmitter {
     // site's own concurrency ceiling, but cross-host checks (CDNs, fonts, map
     // tiles, analytics) hit many *different* servers and can fan out widely —
     // a single small pool for both is what made this phase dominate wall time.
+    // Cache for hosts that failed connection/DNS to avoid repeating timeouts
+    const failedHosts = new Set<string>();
+
     const checkOne = async (current: string) => {
       const info = targetMap.get(current)!;
+      let host = "";
+      try { host = new URL(current).host; } catch {}
+
+      if (host && failedHosts.has(host)) {
+        crawledStatus.set(current, 0);
+        for (let i = 0; i < info.sources.length; i++) {
+          this.allLinks.push({
+            crawlId: this.crawlId,
+            source: info.sources[i],
+            target: current,
+            anchorText: info.anchors[i] || "",
+            nofollow: info.nofollow,
+            isInternal: info.isInternal,
+            targetStatus: 0,
+            isBroken: false,
+            isRedirect: false,
+            redirectChain: [],
+          });
+        }
+        return;
+      }
+
       const res = await fetchPage(current, {
         timeoutMs: info.isInternal ? opts.timeoutMs : opts.externalLinkTimeoutMs,
         method: "HEAD",
         followRedirects: true,
       });
+      if (res.status === 0 && host && !info.isInternal) {
+        failedHosts.add(host);
+      }
       crawledStatus.set(current, res.status);
 
       for (let i = 0; i < info.sources.length; i++) {
@@ -630,8 +751,8 @@ export class Crawler extends EventEmitter {
     const externalTargets = toVerify.filter((u) => !targetMap.get(u)?.isInternal);
 
     await Promise.all([
-      runPool(internalTargets, opts.concurrency || 6),
-      runPool(externalTargets, 16),
+      runPool(internalTargets, opts.concurrency || 8),
+      runPool(externalTargets, Math.min(48, Math.max(24, (opts.concurrency || 12) * 2))),
     ]);
 
     // Record links to already-crawled pages
@@ -684,15 +805,23 @@ export class Crawler extends EventEmitter {
     const N = this.pages.length;
     const score = new Map<string, number>();
     for (const p of this.pages) score.set(p.normalizedUrl, 1 / Math.max(N, 1));
+    // Single-pass adjacency index O(L) instead of O(P * L)
+    const outgoingTargets = new Map<string, Set<string>>();
+    for (const link of this.allLinks) {
+      if (!link.isInternal || link.nofollow) continue;
+      const srcNorm = normalizeUrl(link.source);
+      const tgtNorm = normalizeUrl(link.target);
+      if (srcNorm === tgtNorm || !pageByNorm.has(tgtNorm)) continue;
+      let set = outgoingTargets.get(srcNorm);
+      if (!set) {
+        set = new Set();
+        outgoingTargets.set(srcNorm, set);
+      }
+      set.add(tgtNorm);
+    }
     const outDegree = new Map<string, number>();
     for (const p of this.pages) {
-      const outs = new Set(
-        this.allLinks
-          .filter((l) => normalizeUrl(l.source) === p.normalizedUrl && l.isInternal && !l.nofollow)
-          .map((l) => normalizeUrl(l.target))
-          .filter((t) => pageByNorm.has(t) && t !== p.normalizedUrl)
-      );
-      outDegree.set(p.normalizedUrl, outs.size);
+      outDegree.set(p.normalizedUrl, outgoingTargets.get(p.normalizedUrl)?.size || 0);
     }
 
     const d = 0.85;
@@ -855,8 +984,18 @@ export class Crawler extends EventEmitter {
 
     // 2. Duplicate content: exact-hash groups + shingle-Jaccard near-dups
     try {
+      // One input per final URL: a redirected request (e.g. /old → /new) fetched the
+      // same document as its target and must not be reported as a duplicate of it.
+      const seenFinal = new Set<string>();
       const inputs = this.pages
         .filter((p) => p.status === 200 && p.bodyText && p.bodyText.length > 0)
+        .sort((a, b) => Number(!!a.isRedirect) - Number(!!b.isRedirect))
+        .filter((p) => {
+          const key = normalizeUrl((p as any).finalUrl || p.url);
+          if (seenFinal.has(key)) return false;
+          seenFinal.add(key);
+          return true;
+        })
         .map((p) => ({ url: p.url, bodyText: p.bodyText || "" }));
       if (inputs.length >= 2) {
         const { exactGroups, nearDuplicates } = detectDuplicates(inputs);

@@ -69,6 +69,7 @@ export interface CrawlOptions {
   concurrency?: number;
   limit?: number; // crawl budget (max pages)
   render?: boolean; // optional Playwright render mode
+  reach?: boolean; // optional Agent Reach anti-bot / login-walled fallback
   strategy?: CrawlStrategy;
   sampleSitemap?: number;
   canonicalPolicy?: CanonicalPolicy;
@@ -79,12 +80,19 @@ export interface CrawlOptions {
   externalLinkTimeoutMs?: number;
   timeoutMs?: number;
   followSitemap?: boolean;
+  maxRetries?: number;
   // SEOForge 2.0 driver fields (passed through to the check engine)
   expectedEntities?: string[];
   thresholds?: Thresholds;
   paths?: string[];
   sitemapOverride?: string;
   seedUrls?: string[];
+  /**
+   * Production origin for staging/local audits (e.g. "https://example.com" while crawling http://localhost:3000).
+   * Sitemap/seed URLs on this origin are rewritten to the crawl origin, and canonical/hreflang/og URLs on it
+   * are treated as same-site, so pre-deploy audits don't report host-mismatch noise.
+   */
+  productionOrigin?: string;
   /** Custom Extraction rules (Screaming Frog parity: CSS, XPath, Regex) */
   customExtractors?: Array<{
     id: string;
@@ -118,6 +126,7 @@ export interface DomainConfig {
   paths?: string[];
   // SEOForge 2.0 additions
   render?: boolean;
+  reach?: boolean;
   crawlStrategy?: CrawlStrategy;
   maxDepth?: number;
   excludePatterns?: string[];

@@ -49,9 +49,11 @@ export function computeSimHash(text: string): bigint {
 
   for (const [shingle, weight] of frequencies) {
     const hash = fnv1a64(shingle);
-    for (let i = 0; i < 64; i++) {
-      const bit = (hash >> BigInt(i)) & 1n;
-      bitCounts[i] += bit === 1n ? weight : -weight;
+    const lo = Number(hash & 0xffffffffn);
+    const hi = Number((hash >> 32n) & 0xffffffffn);
+    for (let i = 0; i < 32; i++) {
+      bitCounts[i] += ((lo >>> i) & 1) ? weight : -weight;
+      bitCounts[i + 32] += ((hi >>> i) & 1) ? weight : -weight;
     }
   }
 
@@ -66,16 +68,23 @@ export function computeSimHash(text: string): bigint {
 }
 
 /**
+ * Fast 32-bit parallel popcount (Hamming weight).
+ * Runs in ~4 CPU instructions, zero heap allocations.
+ */
+export function popcount32(v: number): number {
+  v = v - ((v >>> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >>> 2) & 0x33333333);
+  return (((v + (v >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+/**
  * Calculates the Hamming distance (number of differing bits) between two 64-bit fingerprints.
  */
 export function hammingDistance(a: bigint, b: bigint): number {
-  let diff = a ^ b;
-  let count = 0;
-  while (diff > 0n) {
-    count += Number(diff & 1n);
-    diff >>= 1n;
-  }
-  return count;
+  const diff = a ^ b;
+  const lo = Number(diff & 0xffffffffn);
+  const hi = Number((diff >> 32n) & 0xffffffffn);
+  return popcount32(lo) + popcount32(hi);
 }
 
 /**

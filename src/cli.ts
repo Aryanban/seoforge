@@ -56,6 +56,7 @@ import { testRobotsPath, auditRobotsAiCompliance, formatRobotsAuditMarkdown } fr
 import { analyzeRedirectChain, generateDirectRedirectCode } from "./analysis/redirect-tracer.js";
 import { analyzePageSpeedLab } from "./analysis/pagespeed-lab.js";
 import { fetchPage } from "./crawl/fetcher.js";
+import { agentReachRead, agentReachDoctor, isAgentReachAvailable } from "./crawl/agent-reach.js";
 import {
   discover,
   hostAttempts,
@@ -76,6 +77,11 @@ import { loadConfig, mergeCrawlOptions } from "./config.js";
 import { openStore, migrateLegacySnapshots } from "./store/db.js";
 import * as repo from "./store/repository.js";
 import { crawlDomain } from "./crawler.js";
+import {
+  timesfmForecast,
+  forecastCrawlTrend,
+  formatTimesfmMarkdown,
+} from "./forecasting/index.js";
 
 const program = new Command();
 
@@ -123,16 +129,43 @@ program
   .description("Crawl a full site: BFS discovery, robots compliance, sitemap parsing, broken-link checks, and AI issue reports")
   .option("-d, --depth <n>", "Maximum crawl depth", "10")
   .option("-l, --limit <n>", "Crawl budget (max pages)", "1000")
-  .option("-c, --concurrency <n>", "Concurrent requests", "8")
+  .option("-c, --concurrency <n>", "Concurrent requests", "12")
   .option("-r, --render", "Enable Playwright JS rendering for SPAs")
+  .option("--reach", "Enable Agent Reach engine for login-walled/anti-bot platforms (Reddit, Twitter, YouTube, etc.)")
   .option("-s, --strategy <strategy>", "Crawl strategy: discover | sitemap | config", "discover")
   .option("--sample <count>", "When strategy=sitemap, audit N random sitemap URLs")
   .option("--save", "Save markdown + AI fix-backlog reports to reports/")
   .option("--no-robots", "Ignore robots.txt disallow rules")
+  .option("--no-external", "Skip verifying external link targets")
+  .option("--sitemap <url>", "Use this sitemap URL instead of auto-discovering one")
+  .option("--seeds <file>", "File of extra seed URLs (one per line; blank lines and # comments ignored)")
+  .option("--production-origin <origin>", "Production origin for staging/local audits (rewrites sitemap/seed URLs and treats its canonical/hreflang/og URLs as same-site)")
+  .option("--all-sitemap", "Crawl every sitemap URL: sets strategy=sitemap and raises the default limit to 200000")
   .action(async (url: string | undefined, options) => {
     const config = await loadConfig().catch(() => null);
     let targetUrl = url;
     let extra: CrawlOptions = {};
+
+    let seedUrls: string[] | undefined;
+    if (options.seeds) {
+      const raw = await fs.readFile(options.seeds, "utf8");
+      seedUrls = raw
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !line.startsWith("#"));
+    }
+
+    let productionOrigin: string | undefined;
+    if (options.productionOrigin) {
+      try {
+        productionOrigin = new URL(options.productionOrigin).origin;
+      } catch {
+        console.error(red(`Invalid --production-origin: ${options.productionOrigin}`));
+        process.exit(1);
+      }
+    }
+
+    if (options.allSitemap && options.limit === "1000") options.limit = "200000";
 
     if (!targetUrl) {
       if (!config) {
@@ -153,13 +186,19 @@ program
       limit: parseInt(options.limit, 10),
       concurrency: parseInt(options.concurrency, 10),
       render: !!options.render,
+      reach: !!options.reach,
       strategy: options.strategy,
       sampleSitemap: options.sample ? parseInt(options.sample, 10) : undefined,
       respectRobots: options.robots !== false,
+      checkExternalLinks: options.external !== false,
       ...extra,
     };
+    if (options.allSitemap) opts.strategy = "sitemap";
+    if (options.sitemap) opts.sitemapOverride = options.sitemap;
+    if (seedUrls) opts.seedUrls = seedUrls;
+    if (productionOrigin) opts.productionOrigin = productionOrigin;
 
-    console.log(bold(cyan(`\n🕷  Crawling ${targetUrl} (depth ${opts.maxDepth}, budget ${opts.limit}, strategy ${opts.strategy}${opts.render ? ", render mode" : ""})…\n`)));
+    console.log(bold(cyan(`\n🕸  Crawling ${targetUrl} (depth ${opts.maxDepth}, budget ${opts.limit}, strategy ${opts.strategy}${opts.render ? ", render mode" : ""}${opts.reach ? ", reach mode" : ""})…\n`)));
 
     const result = await crawlSite(targetUrl, opts);
     console.log(formatCrawlTerminalOutput(result));
@@ -188,16 +227,95 @@ program
   .option("-e, --expected <entities>", "Comma-separated expected Schema.org entities")
   .option("-p, --policy <policy>", "Canonical policy ('strict' or 'spa')", "strict")
   .option("-r, --render", "Render with headless Chromium (SPA support + Core Web Vitals)")
+  .option("--reach", "Enable Agent Reach engine for login-walled/anti-bot scraping")
   .action(async (url: string, options) => {
     const expected = options.expected ? options.expected.split(",").map((s: string) => s.trim()) : [];
     const policy = options.policy === "spa" ? "spa" : "strict";
-    console.log(bold(cyan(`\n🔍 Inspecting ${url}${options.render ? " (render mode)" : ""}…`)));
+    console.log(bold(cyan(`\n🔍 Inspecting ${url}${options.render ? " (render mode)" : ""}${options.reach ? " (reach mode)" : ""}…`)));
     const { page } = await auditSinglePage(url, {
       expectedEntities: expected,
       canonicalPolicy: policy,
       render: !!options.render,
+      reach: !!options.reach,
     });
     console.log(formatPageTerminal(page));
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: reach                                                      */
+/* ------------------------------------------------------------------ */
+program
+  .command("reach <url>")
+  .description("Read and scrape any URL using the Agent Reach engine (bypasses anti-bot & login walls)")
+  .option("-c, --channel <channel>", "Channel override (web, github, youtube, reddit, bilibili, v2ex, etc.)")
+  .option("-b, --backend <backend>", "Backend engine override (jina, exa, playwright, curl)")
+  .action(async (url: string, options) => {
+    console.log(bold(cyan(`\n⚡ Agent Reach: reading ${url}…`)));
+    const res = await agentReachRead(url, {
+      channel: options.channel,
+      backend: options.backend,
+    });
+
+    if (!res.ok) {
+      console.error(red(`\n✖ Agent Reach read failed: ${res.error?.message || "Unknown error"}`));
+      if (res.error?.hint) console.error(yellow(`  Hint: ${res.error.hint}`));
+      process.exit(1);
+    }
+
+    console.log(green(`\n✔ Scraped via channel: ${bold(res.channel || "web")} (backend: ${res.backend || "auto"})`));
+    if (res.meta?.elapsed_ms) console.log(gray(`  Elapsed: ${res.meta.elapsed_ms}ms`));
+
+    const items = res.items || [];
+    console.log(bold(`  Found ${items.length} item(s):`));
+    for (const [idx, item] of items.entries()) {
+      console.log(`\n  [${idx + 1}] ${bold(item.title || "Untitled")}`);
+      if (item.author) console.log(`      Author: ${item.author}`);
+      if (item.published_at) console.log(`      Published: ${item.published_at}`);
+      if (item.url) console.log(`      URL: ${cyan(item.url)}`);
+      if (item.text) {
+        const preview = item.text.slice(0, 300).replace(/\n+/g, " ");
+        console.log(`      Text: ${preview}${item.text.length > 300 ? "…" : ""}`);
+      }
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: reach:doctor                                               */
+/* ------------------------------------------------------------------ */
+program
+  .command("reach:doctor")
+  .description("Check Agent Reach CLI status, installed channels, and tool dependencies")
+  .action(async () => {
+    console.log(bold(cyan("\n🩺 Checking Agent Reach environment…\n")));
+    const available = await isAgentReachAvailable();
+    if (!available) {
+      console.error(red("✖ agent-reach CLI binary is not found in PATH."));
+      console.log(yellow("  Install with: uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip"));
+      console.log(yellow("  Then initialize with: agent-reach setup"));
+      process.exit(1);
+    }
+
+    const doc = await agentReachDoctor();
+    if (!doc.ok) {
+      console.error(red(`✖ Doctor failed: ${doc.error}`));
+      process.exit(1);
+    }
+
+    console.log(green(`✔ Agent Reach version: ${bold(doc.version || "unknown")}`));
+    if (doc.channels && doc.channels.length > 0) {
+      console.log(bold("\nChannels:"));
+      for (const ch of doc.channels) {
+        const st = ch.status === "ready" ? green("ready") : yellow(ch.status);
+        console.log(`  • ${ch.channel.padEnd(14)} [${ch.level.padEnd(12)}] ${st}`);
+      }
+    }
+    if (doc.tools && doc.tools.length > 0) {
+      console.log(bold("\nPrivate Tools:"));
+      for (const t of doc.tools) {
+        console.log(`  • ${t.tool.padEnd(14)} (${t.version}) by ${t.owner}`);
+      }
+    }
+    console.log("");
   });
 
 /* ------------------------------------------------------------------ */
@@ -1169,6 +1287,56 @@ program
       for (const rec of lab.recommendations) {
         console.log("  - [" + rec.priority + "] " + rec.text);
       }
+    }
+  });
+
+program
+  .command("forecast [url]")
+  .description("Zero-shot time series forecasting and anomaly detection via Google Research TimesFM")
+  .option("-m, --metric <name>", "Crawl metric: aeo, errors, warnings, notices, urls", "aeo")
+  .option("-H, --horizon <number>", "Forecast horizon in steps/intervals", "7")
+  .option("-f, --freq <frequency>", "Frequency: daily, weekly, monthly, crawl", "daily")
+  .option("-s, --series <numbers>", "Comma-separated manual time series (e.g. 10,12,15,14,18)")
+  .option("--json", "Output raw JSON result instead of formatted markdown")
+  .action(async (url, options) => {
+    const horizon = parseInt(options.horizon, 10) || 7;
+    const freq = options.freq || "daily";
+
+    if (options.series) {
+      const numbers = options.series.split(",").map((s: string) => parseFloat(s.trim())).filter((n: number) => !isNaN(n));
+      const res = timesfmForecast(numbers, {
+        horizon,
+        freq,
+        metricName: options.metric || "Custom Series",
+      });
+      if (options.json) {
+        console.log(JSON.stringify(res, null, 2));
+      } else {
+        console.log(formatTimesfmMarkdown(res));
+      }
+      return;
+    }
+
+    const db = await ensureStore();
+    let targetUrl = url;
+    if (!targetUrl) {
+      const latest = repo.listCrawls(db, 1)[0];
+      if (!latest) {
+        console.error(red("No crawls found in database. Pass a target URL or run a crawl first."));
+        process.exit(1);
+      }
+      targetUrl = latest.targetUrl;
+    }
+
+    const res = forecastCrawlTrend(db, targetUrl, options.metric as any, {
+      horizon,
+      freq,
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      console.log(formatTimesfmMarkdown(res));
     }
   });
 

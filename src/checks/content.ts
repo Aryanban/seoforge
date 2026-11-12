@@ -31,7 +31,7 @@ export function contentChecks(ctx: PageCheckContext): CheckOutput {
   // Deep content analysis: readability and keyword stuffing
   if (meta.wordCount >= 150) {
     try {
-      const analysis = analyzeContent(html, { url: pageUrl });
+      const analysis = analyzeContent(ctx.$ ?? html, { url: pageUrl });
 
       // Keyword stuffing detection
       const allNgrams = [

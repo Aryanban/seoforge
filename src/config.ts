@@ -8,6 +8,7 @@ export interface ResolvedCrawlOptions extends CrawlOptions {
   concurrency: number;
   limit: number;
   render: boolean;
+  reach: boolean;
   strategy: CrawlStrategy;
   sampleSitemap: number;
   canonicalPolicy: CanonicalPolicy;
@@ -18,6 +19,7 @@ export interface ResolvedCrawlOptions extends CrawlOptions {
   externalLinkTimeoutMs: number;
   timeoutMs: number;
   followSitemap: boolean;
+  maxRetries: number;
 }
 
 export const DEFAULT_CRAWL_OPTIONS: ResolvedCrawlOptions = {
@@ -25,6 +27,7 @@ export const DEFAULT_CRAWL_OPTIONS: ResolvedCrawlOptions = {
   concurrency: 8,
   limit: 1000,
   render: false,
+  reach: false,
   strategy: "discover",
   sampleSitemap: 0,
   canonicalPolicy: "strict",
@@ -35,6 +38,7 @@ export const DEFAULT_CRAWL_OPTIONS: ResolvedCrawlOptions = {
   externalLinkTimeoutMs: 4000,
   timeoutMs: 15000,
   followSitemap: true,
+  maxRetries: 2,
 };
 
 const domainSchema = z.object({
@@ -50,6 +54,7 @@ const domainSchema = z.object({
   expectedEntities: z.array(z.string()).optional(),
   paths: z.array(z.string()).optional(),
   render: z.boolean().optional(),
+  reach: z.boolean().optional(),
   crawlStrategy: z.enum(["discover", "sitemap", "config"]).optional(),
   maxDepth: z.number().int().positive().optional(),
   excludePatterns: z.array(z.string()).optional(),
@@ -79,6 +84,7 @@ const configSchema = z.object({
     concurrency: z.number().int().positive().optional(),
     limit: z.number().int().positive().optional(),
     render: z.boolean().optional(),
+    reach: z.boolean().optional(),
     strategy: z.enum(["discover", "sitemap", "config"]).optional(),
     sampleSitemap: z.number().int().nonnegative().optional(),
     canonicalPolicy: z.enum(["strict", "spa"]).optional(),
@@ -147,6 +153,7 @@ export function mergeCrawlOptions(
     strategy: domain.crawlStrategy ?? config.crawl?.strategy ?? DEFAULT_CRAWL_OPTIONS.strategy,
     maxDepth: domain.maxDepth ?? config.crawl?.maxDepth ?? DEFAULT_CRAWL_OPTIONS.maxDepth,
     render: domain.render ?? config.crawl?.render ?? DEFAULT_CRAWL_OPTIONS.render,
+    reach: domain.reach ?? config.crawl?.reach ?? DEFAULT_CRAWL_OPTIONS.reach,
     checkExternalLinks:
       domain.checkExternalLinks ?? config.crawl?.checkExternalLinks ?? DEFAULT_CRAWL_OPTIONS.checkExternalLinks,
     excludePatterns: domain.excludePatterns ?? config.crawl?.excludePatterns ?? [],

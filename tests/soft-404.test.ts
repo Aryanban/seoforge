@@ -51,4 +51,72 @@ describe("Soft 404 Detection Engine", () => {
     const res = checkSoft404(page);
     expect(res.isSoft404).toBe(false);
   });
+
+  it("does not flag a long real content page whose name contains 404", () => {
+    const normalWords = Array(900).fill("survey land record village plot map").join(" ");
+    const page = {
+      url: "https://dholeramap.com/survey/ambli/404",
+      status: 200,
+      title: "Survey 404, Ambli: Map & 7/12 Records | DholeraMap",
+      h1Text: "Survey No. 404, Ambli",
+      bodyText: normalWords,
+      wordCount: 900,
+    };
+
+    const res = checkSoft404(page);
+    expect(res.isSoft404).toBe(false);
+    expect(res.confidence).toBeLessThan(45);
+  });
+
+  it("flags a short page titled '404 Not Found' with 'Page not found' H1", () => {
+    const page = {
+      url: "https://example.com/missing",
+      status: 200,
+      title: "404 Not Found",
+      h1Text: "Page not found",
+      bodyText: "Sorry the page you asked for is gone. Try the home page or search instead for what you need today.",
+      wordCount: 20,
+    };
+
+    const res = checkSoft404(page);
+    expect(res.isSoft404).toBe(true);
+    expect(res.confidence).toBeGreaterThanOrEqual(45);
+  });
+
+  it("flags a short 'Error 404' titled page", () => {
+    const page = {
+      url: "https://example.com/broken",
+      status: 200,
+      title: "Error 404 | Site",
+      h1Text: "Oops",
+      bodyText: "Something went wrong here.",
+      wordCount: 5,
+    };
+
+    const res = checkSoft404(page);
+    expect(res.isSoft404).toBe(true);
+  });
+
+  it("scores a long 'Page not found' titled page lower than a short one", () => {
+    const longPage = {
+      url: "https://example.com/long",
+      status: 200,
+      title: "Page not found",
+      bodyText: Array(900).fill("normal article text about land and plots").join(" "),
+      wordCount: 900,
+    };
+    const shortPage = {
+      url: "https://example.com/short",
+      status: 200,
+      title: "404 Not Found",
+      h1Text: "Page not found",
+      bodyText: "Sorry the page you asked for is gone. Try the home page or search instead for what you need today.",
+      wordCount: 20,
+    };
+
+    const longRes = checkSoft404(longPage);
+    const shortRes = checkSoft404(shortPage);
+    expect(longRes.isSoft404).toBe(false);
+    expect(longRes.confidence).toBeLessThan(shortRes.confidence);
+  });
 });

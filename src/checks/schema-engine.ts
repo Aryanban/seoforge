@@ -6,10 +6,10 @@ import * as cheerio from "cheerio";
 import { SchemaValidationResult } from "../types.js";
 
 export function validateSchemaOrg(
-  html: string,
+  htmlOrCheerio: string | cheerio.CheerioAPI,
   expectedEntities: string[] = []
 ): SchemaValidationResult {
-  const $ = cheerio.load(html);
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
   const typesFound: string[] = [];
   const errors: string[] = [];
   const googleRichResultsErrors: string[] = [];

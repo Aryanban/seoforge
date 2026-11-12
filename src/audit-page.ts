@@ -5,6 +5,7 @@
 import { PageAuditResult, AuditIssue, CanonicalPolicy, CoreWebVitals } from "./types.js";
 import { fetchPage } from "./crawl/fetcher.js";
 import { renderUrl } from "./crawl/renderer.js";
+import { agentReachFetch, isAgentReachAvailable } from "./crawl/agent-reach.js";
 import { extractLinks, extractImages } from "./crawl/link-extractor.js";
 import { normalizeUrl } from "./crawl/queue.js";
 import { runPageChecks, Thresholds } from "./checks/registry.js";
@@ -25,6 +26,7 @@ export interface SinglePageOptions {
   expectedEntities?: string[];
   canonicalPolicy?: CanonicalPolicy;
   render?: boolean;
+  reach?: boolean;
   timeoutMs?: number;
   thresholds?: Thresholds;
   targetKeyword?: string;
@@ -49,6 +51,7 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
     expectedEntities = [],
     canonicalPolicy = "strict",
     render = false,
+    reach = false,
     timeoutMs = 15000,
     thresholds,
   } = options;
@@ -90,6 +93,29 @@ export async function auditSinglePage(url: string, options: SinglePageOptions = 
     isRedirect = raw.redirected;
     redirectChain = raw.redirectChain;
     isHttpToHttpsRedirect = raw.requestedUrl.startsWith("http://") && raw.finalUrl.startsWith("https://");
+
+    // Agent Reach fallback if requested or if anti-bot blocked
+    if (reach || (status === 403 || status === 429)) {
+      try {
+        const available = await isAgentReachAvailable();
+        if (available) {
+          const reachResult = await agentReachFetch(url, { timeoutMs });
+          if (reachResult.ok && reachResult.html) {
+            html = reachResult.html;
+            finalUrl = reachResult.finalUrl || url;
+            status = reachResult.status;
+            responseTimeMs = reachResult.responseTimeMs;
+            ttfbMs = reachResult.ttfbMs;
+            headers = reachResult.headers;
+            isRedirect = reachResult.redirected;
+            redirectChain = reachResult.redirectChain;
+            isHttpToHttpsRedirect = reachResult.requestedUrl.startsWith("http://") && reachResult.finalUrl.startsWith("https://");
+          }
+        }
+      } catch {
+        // Keep raw fetch result
+      }
+    }
   }
 
   const links = html ? extractLinks(html, finalUrl) : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };

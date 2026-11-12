@@ -14,6 +14,13 @@ export * from "./config.js";
 export { Crawler, crawlSite } from "./crawl/crawler.js";
 export { auditSinglePage } from "./audit-page.js";
 export { fetchPage } from "./crawl/fetcher.js";
+export {
+  isAgentReachAvailable,
+  agentReachDoctor,
+  agentReachRead,
+  agentReachFetch,
+  synthesizeHtmlFromReach,
+} from "./crawl/agent-reach.js";
 export { parseSitemap } from "./crawl/sitemap-parser.js";
 export { renderUrl, isRenderAvailable } from "./crawl/renderer.js";
 export { extractLinks, extractImages } from "./crawl/link-extractor.js";
@@ -49,6 +56,7 @@ export * from "./schema-generator.js";
 export * from "./link-opportunities.js";
 export * from "./keyword-intelligence.js";
 export * from "./anchor-analyzer.js";
+export * from "./forecasting/index.js";
 
 // v1 backwards compatibility
 export { crawlDomain, crawlPage } from "./crawler.js";

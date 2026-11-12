@@ -142,7 +142,9 @@ export function statusIndexabilityChecks(ctx: PageCheckContext): CheckOutput {
   }
 
   // Non-canonical HTTPS scheme
-  if (pageUrl.startsWith("http://") && !ctx.isHttpToHttpsRedirect) {
+  // Skipped for staging/local mirrors of an HTTPS production origin (--production-origin).
+  const auditingHttpsMirror = String(ctx.options?.productionOrigin || "").startsWith("https://");
+  if (pageUrl.startsWith("http://") && !ctx.isHttpToHttpsRedirect && !auditingHttpsMirror) {
     issues.push({
       id: "insecure_http_page",
       name: "Page served over insecure HTTP",

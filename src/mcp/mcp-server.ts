@@ -17,6 +17,7 @@ import {
 import { Crawler } from "../crawl/crawler.js";
 import { crawlSite } from "../crawl/crawler.js";
 import { fetchPage } from "../crawl/fetcher.js";
+import { agentReachRead, agentReachDoctor, isAgentReachAvailable } from "../crawl/agent-reach.js";
 import { auditSinglePage } from "../audit-page.js";
 import { parseSitemap } from "../crawl/sitemap-parser.js";
 import { submitToIndexNow } from "../indexnow.js";
@@ -79,6 +80,11 @@ import {
   generateKeywordVariations,
   auditSearchIntentAlignment,
 } from "../keyword-intelligence.js";
+import {
+  timesfmForecast,
+  forecastCrawlTrend,
+  formatTimesfmMarkdown,
+} from "../forecasting/index.js";
 
 interface AsyncJob {
   crawlId: string;
@@ -132,6 +138,7 @@ export function createMcpServer(): Server {
             limit: { type: "number", description: "Crawl budget — maximum pages to fetch (default 1000)." },
             concurrency: { type: "number", description: "Concurrent requests (default 8)." },
             render: { type: "boolean", description: "Enable Playwright JS rendering for SPAs (requires `npm i playwright && npx playwright install chromium`)." },
+            reach: { type: "boolean", description: "Enable Agent Reach engine for anti-bot bypass and scraping login-walled/dynamic platforms (Reddit, Twitter, YouTube, etc.)." },
             strategy: { type: "string", enum: ["discover", "sitemap", "config"], description: "'discover' BFS from root; 'sitemap' seed from sitemap URLs; 'config' use configured paths." },
             async_mode: { type: "boolean", description: "Return a crawlId immediately and poll with seoforge_crawl_status (recommended for large sites)." },
             save_report: { type: "boolean", description: "Write the markdown report to reports/ (default true)." },
@@ -223,6 +230,7 @@ export function createMcpServer(): Server {
             expected_entities: { type: "array", items: { type: "string" }, description: "Expected Schema.org types (e.g. ['WebSite','FAQPage'])" },
             canonical_policy: { type: "string", enum: ["strict", "spa"] },
             render: { type: "boolean", description: "Render with headless Chromium (SPA support)." },
+            reach: { type: "boolean", description: "Enable Agent Reach engine for login-walled/anti-bot platforms (Reddit, Twitter, YouTube, etc.)." },
           },
           required: ["url"],
         },
@@ -679,6 +687,66 @@ export function createMcpServer(): Server {
           },
         },
       },
+      {
+        name: "seoforge_reach_read",
+        description:
+          "Agent Reach Scraper & Anti-Bot Engine: Read/scrape any URL using Agent Reach. Bypasses anti-bot barriers and extracts clean text/markdown + structured data from login-walled platforms (Reddit, Twitter/X, LinkedIn, Xiaohongshu), video transcripts (YouTube, Bilibili), and rich web pages.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            url: { type: "string", description: "Target URL to read and scrape" },
+            channel: { type: "string", description: "Optional channel override ('web', 'github', 'youtube', 'reddit', 'bilibili', 'v2ex', 'xiaohongshu', 'twitter', etc.)" },
+            backend: { type: "string", description: "Optional backend engine ('jina', 'exa', 'playwright', 'curl')" },
+            timeout_ms: { type: "number", description: "Execution timeout in milliseconds (default 25000)" },
+          },
+          required: ["url"],
+        },
+      },
+      {
+        name: "seoforge_reach_status",
+        description:
+          "Inspect Agent Reach scraping engine health, version, supported channels, and private tools status.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "seoforge_forecast",
+        description:
+          "TimesFM Zero-Shot Forecasting & Anomaly Detection: Predict future SEO & AEO trajectories (AEO citation score, crawl errors, warnings, organic traffic, CWV) using Google Research TimesFM (Time Series Foundation Model) architecture. Generates point forecasts, P10/P50/P90 quantile intervals, trend slope, and anomaly detection over 7d/30d/90d horizons.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            target_url: {
+              type: "string",
+              description: "Target URL to forecast from stored crawl history (defaults to latest crawl if omitted)",
+            },
+            metric: {
+              type: "string",
+              enum: ["aeo", "errors", "warnings", "notices", "urls"],
+              description: "Crawl metric to forecast (default 'aeo')",
+            },
+            series: {
+              type: "array",
+              description: "Optional custom numeric series [10, 15, 20, ...] or [{timestamp, value}, ...] for arbitrary time-series forecasting",
+            },
+            horizon: {
+              type: "number",
+              description: "Number of future steps/intervals to forecast (default 7)",
+            },
+            freq: {
+              type: "string",
+              enum: ["daily", "weekly", "monthly", "crawl"],
+              description: "Time frequency ('daily', 'weekly', 'monthly', 'crawl'). Default 'daily'",
+            },
+            format_markdown: {
+              type: "boolean",
+              description: "Return human/agent-readable markdown report with ASCII sparkline bands (default true)",
+            },
+          },
+        },
+      },
     ],
   }));
 
@@ -712,6 +780,7 @@ export function createMcpServer(): Server {
             limit: numArg(args?.limit),
             concurrency: numArg(args?.concurrency),
             render: args?.render as boolean | undefined,
+            reach: args?.reach as boolean | undefined,
             strategy: args?.strategy as any,
           });
           crawlOpts.expectedEntities = match.expectedEntities;
@@ -724,6 +793,7 @@ export function createMcpServer(): Server {
             limit: numArg(args?.limit) ?? 1000,
             concurrency: numArg(args?.concurrency) ?? 8,
             render: (args?.render as boolean) ?? false,
+            reach: (args?.reach as boolean) ?? false,
             strategy: (args?.strategy as any) ?? "discover",
           };
         }
@@ -967,6 +1037,7 @@ export function createMcpServer(): Server {
           expectedEntities: args?.expected_entities as string[] | undefined,
           canonicalPolicy: args?.canonical_policy as any,
           render: args?.render as boolean | undefined,
+          reach: args?.reach as boolean | undefined,
           targetKeyword: args?.target_keyword as string | undefined,
         });
         return ok(result);
@@ -1620,6 +1691,62 @@ export function createMcpServer(): Server {
           minAeoScore: numArg(args?.min_aeo_score),
         });
         return ok(gate);
+      }
+
+      if (name === "seoforge_reach_read") {
+        const url = String(args?.url || "");
+        if (!url) return err("url is required.");
+        const channel = args?.channel ? String(args.channel) : undefined;
+        const backend = args?.backend ? String(args.backend) : undefined;
+        const timeoutMs = numArg(args?.timeout_ms);
+        const result = await agentReachRead(url, { channel, backend, timeoutMs });
+        return ok(result);
+      }
+
+      if (name === "seoforge_reach_status") {
+        const available = await isAgentReachAvailable();
+        if (!available) {
+          return ok({
+            installed: false,
+            message:
+              "Agent Reach CLI is not detected in PATH. Install via 'uv tool install https://github.com/Panniantong/Agent-Reach/releases/latest/download/agent-reach.zip' and run 'agent-reach setup'.",
+          });
+        }
+        const doctor = await agentReachDoctor();
+        return ok({
+          installed: true,
+          ...doctor,
+        });
+      }
+
+      if (name === "seoforge_forecast") {
+        const horizon = numArg(args?.horizon) ?? 7;
+        const freq = (args?.freq as any) ?? "daily";
+        const formatMd = args?.format_markdown !== false;
+
+        if (Array.isArray(args?.series) && args.series.length > 0) {
+          const forecast = timesfmForecast(args.series as any, {
+            horizon,
+            freq,
+            metricName: (args?.metric as string) || "Custom Time Series",
+          });
+          return ok(formatMd ? { ...forecast, markdown: formatTimesfmMarkdown(forecast) } : forecast);
+        }
+
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        let targetUrl = args?.target_url as string | undefined;
+        if (!targetUrl) {
+          const latest = repo.listCrawls(db, 1)[0];
+          if (!latest) return err("No crawls found in store. Pass 'target_url' or supply 'series'.");
+          targetUrl = latest.targetUrl;
+        }
+
+        const metric = (args?.metric as any) ?? "aeo";
+        const forecast = forecastCrawlTrend(db, targetUrl, metric, {
+          horizon,
+          freq,
+        });
+        return ok(formatMd ? { ...forecast, markdown: formatTimesfmMarkdown(forecast) } : forecast);
       }
 
       return err(`Unknown tool '${name}'`);

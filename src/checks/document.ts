@@ -15,7 +15,7 @@ export function documentChecks(ctx: PageCheckContext): CheckOutput {
   const issues: AuditIssue[] = [];
   const { html, pageUrl, status } = ctx;
   if (!html || status === 0) return { issues };
-  const $ = cheerio.load(html);
+  const $ = ctx.$ ?? cheerio.load(html);
 
   const icon =
     $('link[rel="icon" i]').attr("href") ||

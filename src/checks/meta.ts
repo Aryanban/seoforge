@@ -242,7 +242,9 @@ export function metaChecks(ctx: PageCheckContext): CheckOutput {
     });
   }
   for (const lang of meta.hreflang) {
-    if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(lang)) {
+    // BCP 47 language[-script][-region] (e.g. en, en-IN, zh-Hant-TW, es-419) or the
+    // special x-default value Google documents for fallback pages.
+    if (!/^(?:[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|\d{3}))?|x-default)$/i.test(lang)) {
       issues.push({
         id: "hreflang_invalid",
         name: "Invalid hreflang value",

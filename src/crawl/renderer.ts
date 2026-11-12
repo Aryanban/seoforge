@@ -52,6 +52,7 @@ const CWV_INIT_SCRIPT = `
 `;
 
 let chromiumPromise: Promise<any> | null = null;
+let sharedBrowserPromise: Promise<any> | null = null;
 
 async function loadChromium(): Promise<any> {
   if (!chromiumPromise) {
@@ -61,6 +62,28 @@ async function loadChromium(): Promise<any> {
     })();
   }
   return chromiumPromise;
+}
+
+async function getSharedBrowser(chromium: any): Promise<any> {
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = chromium.launch({ headless: true }).catch((err: any) => {
+      sharedBrowserPromise = null;
+      throw err;
+    });
+  }
+  return sharedBrowserPromise;
+}
+
+export async function closeSharedBrowser(): Promise<void> {
+  if (sharedBrowserPromise) {
+    try {
+      const b = await sharedBrowserPromise;
+      await b.close();
+    } catch {
+      /* non-fatal */
+    }
+    sharedBrowserPromise = null;
+  }
 }
 
 export async function isRenderAvailable(): Promise<boolean> {
@@ -88,7 +111,7 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     };
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await getSharedBrowser(chromium);
   const context = await browser.newContext({
     userAgent: "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)",
     bypassCSP: true,
@@ -143,6 +166,5 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     };
   } finally {
     await context.close().catch(() => {});
-    await browser.close().catch(() => {});
   }
 }

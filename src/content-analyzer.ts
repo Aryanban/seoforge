@@ -297,23 +297,33 @@ export function auditTargetKeyword(
 /**
  * Extracts visible body text excluding scripts, styles, noscript, and nav elements.
  */
+const CLEAN_TEXT_SKIP = new Set(["script", "style", "noscript", "svg", "nav", "footer", "iframe", "header"]);
+
 export function extractCleanBodyText($: cheerio.CheerioAPI): string {
-  const clone = cheerio.load($.html());
-  clone("script, style, noscript, svg, nav, footer, iframe, header").remove();
-  return clone("body").text().replace(/\s+/g, " ").trim();
+  const parts: string[] = [];
+  const walk = (nodes: any[]): void => {
+    for (const node of nodes) {
+      if (node.type === "text") parts.push(node.data);
+      else if ((node.type === "tag" || node.type === "script" || node.type === "style") && !CLEAN_TEXT_SKIP.has(String(node.name).toLowerCase())) {
+        if (node.children) walk(node.children);
+      }
+    }
+  };
+  walk($("body").toArray().flatMap((b: any) => b.children ?? []));
+  return parts.join(" ").replace(/\s+/g, " ").trim();
 }
 
 /**
  * Analyzes full on-page HTML content for readability, n-grams, headings, and target keyword.
  */
 export function analyzeContent(
-  html: string,
+  htmlOrCheerio: string | cheerio.CheerioAPI,
   options: {
     targetKeyword?: string;
     url?: string;
   } = {}
 ): ContentAnalysisResult {
-  const $ = cheerio.load(html || "<html><body></body></html>");
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio || "<html><body></body></html>") : htmlOrCheerio;
   const bodyText = extractCleanBodyText($);
 
   const title = $("title").first().text().trim();

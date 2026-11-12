@@ -12,6 +12,37 @@ MCP. It has **no API keys and makes no external LLM calls** — it is safe to ru
 
 ---
 
+## ⚡ Core Operational Doctrine: Ponytail (Always-On In Every Prompt)
+
+> **"You are a lazy senior developer. The best code is the code never written. You solve the whole problem with the least new code."**  
+> **Benchmark Impact:** -53% code, -41% latency, -26% cost, -45% tokens, 98% risky logic tested, 100% security maintained.
+
+Every AI agent across all platforms and harnesses MUST follow this doctrine on **every single prompt**:
+
+### 1. Before You Write
+- Read the task and the code it touches.
+- List every place your change must reach: callers, tests, fixtures, config, exports.
+- Check what your change could break for users: data it would destroy/expose, callers that stop working.
+- **That is scope. Extra features, speculative abstractions, or unsolicited options are NOT.**
+
+### 2. The Smallest Complete Change Ladder
+Take the first option that fully works:
+1. **Does it need to exist?** Skip features, options, and flexibility nobody asked for. A vague request gets the smallest version that does the core job.
+2. **Already in this codebase?** (Helper, component, service, pattern) Use it the way surrounding code does.
+3. **Standard library or platform feature?** Use native platform primitives unless the project has its own.
+4. **An installed dependency?** Use it. Never add a new dependency for a few lines.
+5. **Can it be one line a reader gets at a glance?** One line.
+6. **Otherwise:** The minimum code that works.
+
+### 3. Non-Negotiable Rules
+- **Lazy about the solution, never about the change:** Finish every part the task needs (callers, tests, exports).
+- **Never cut:** Validation at trust boundaries, data-loss error prevention, security, accessibility, tests for non-trivial logic.
+- **Surgical diffs:** The shortest working diff wins. Deletion beats addition. Avoid wrapper classes or type-bloat.
+- **One-test rule:** Non-trivial logic (branches, loops, parsers, finance, security) leaves behind one small, crisp test.
+- **Mandatory Reply Close:** End every reply with 1–2 lines stating what was skipped or not checked, and any risk the user must know.
+
+---
+
 ## 1. Orientation — what's in this repo
 
 ```
@@ -76,8 +107,10 @@ the page — it never crashes the crawl.
 
 | Command | What it does |
 | --- | --- |
-| `crawl [url]` | Full-site BFS crawl. `--depth --limit --concurrency --render --strategy discover\|sitemap\|config --sample --save --no-robots` |
-| `inspect <url>` | Real-time single-URL deep inspection (TTFB, canonical, meta, schema, CWV, AEO) |
+| `crawl [url]` | Full-site BFS crawl. `--depth --limit --concurrency --render --reach --strategy discover\|sitemap\|config --sample --save --no-robots` |
+| `inspect <url>` | Real-time single-URL deep inspection (TTFB, canonical, meta, schema, CWV, AEO, `--reach`) |
+| `reach <url>` | Read and scrape any URL using the Agent Reach engine (bypasses anti-bot & login walls) |
+| `reach:doctor` | Check Agent Reach CLI status, installed channels, and tool dependencies |
 | `serve` | Local dashboard + REST API on `http://127.0.0.1:5173` (`--port --host --no-open`) |
 | `export <md\|csv\|html\|backlog>` | Export the latest crawl (or `--crawl <id>`); CSV `--kind pages\|issues\|links\|recommendations` |
 | `publish [query]` | Browse the 206-source catalog (`--category --kind --status`), or build a plan from `--profile` JSON (`--limit --out`) |
@@ -88,6 +121,7 @@ the page — it never crashes the crawl.
 | `compare` | Competitor gap matrix. `--crawl --competitors` (stored) or `--target --competitor-urls` (live, `--limit`) |
 | `audit` | v1-compatible multi-domain audit (`--sample N` sitemap sampling) |
 | `indexnow --urls a,b` | Ping Bing/Yandex that URLs changed |
+| `forecast [url]` | Zero-shot time-series forecasting & anomaly detection via Google Research TimesFM (`--metric --horizon --freq --series --json`) |
 | `report` / `daily` | Audit + timestamped markdown report / full daily routine |
 | `mcp` | Start the MCP server on stdio |
 
@@ -179,11 +213,11 @@ args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 }
 ```
 
-### The 35 Native MCP Tools
+### The 38 Native MCP Tools
 
 | Tool | Purpose |
 | --- | --- |
-| `seoforge_crawl` | Full-site crawl → grouped issues + AI fix markdown. `async_mode` for large sites. |
+| `seoforge_crawl` | Full-site crawl → grouped issues + AI fix markdown. `async_mode` for large sites, `reach: true` for anti-bot scraping. |
 | `seoforge_crawl_status` | Poll an async crawl until `status === "completed"` |
 | `seoforge_get_issues` | Grouped issues, filterable by severity, with affected URLs |
 | `seoforge_get_recommendations` | Full AI fix backlog as markdown — paste-ready for tickets/PRs |
@@ -191,7 +225,10 @@ args = ["/absolute/path/to/seoforge/dist/cli.js", "mcp"]
 | `seoforge_link_report` | broken / internal / external / redirects, orphans, link scores |
 | `seoforge_sitemap_report` | Sitemap validity + orphan-in-sitemap |
 | `seoforge_export_report` | md / csv / html export into `reports/` |
-| `seoforge_inspect_url` | Live single-URL inspection (+render) |
+| `seoforge_inspect_url` | Live single-URL inspection (+render, +reach) |
+| `seoforge_reach_read` | Scrape & read any URL via Agent Reach anti-bot engine (bypasses login/anti-bot walls) |
+| `seoforge_reach_status` | Inspect Agent Reach engine version, channels, and dependencies |
+| `seoforge_forecast` | TimesFM zero-shot time series forecasting & anomaly detection (P10/P50/P90 quantile intervals for AEO, errors, CWV, traffic) |
 | `seoforge_submit_indexnow` | IndexNow dispatch to Bing, Yandex, and Naver |
 | `seoforge_sample_sitemap` | Audit N random deep sitemap routes |
 | `seoforge_check_llms_txt` | `/llms.txt` + `/llms-full.txt` validation |
@@ -251,6 +288,8 @@ then:
 | `GET /api/crawl/:id/issues` | grouped issues (`?severity=&category=&search=&page=&pageSize=`) |
 | `GET /api/crawl/:id/issue-urls` | URLs for one issue group |
 | `GET /api/crawl/:id/pages` / `/links` / `/recommendations` / `/sitemap` / `/trend` | detail views |
+| `GET /api/crawl/:id/forecast` | TimesFM zero-shot forecast for crawl metric (`?metric=&horizon=&freq=`) |
+| `POST /api/forecast` | TimesFM arbitrary time series forecast (`{series, horizon, freq, metric}`) |
 | `GET /api/crawl/:id/export/{md,html,csv}` | report export |
 | `GET /api/publish/catalog` | browse the 206-source publishing catalog (`?category=&kind=&status=`) |
 | `POST /api/publish/plan` | build a tailored posting plan from a profile |
@@ -362,7 +401,38 @@ Competitors).
 
 ---
 
-## 9. Conventions & gotchas
+## 9. Foundation Models & Reference Implementations: Google TimesFM
+
+SEOForge continually improves feature depth, mathematical accuracy, and execution speed by
+taking direct architectural reference from industry-leading open-source repositories:
+
+**`src/forecasting/` — Google Research TimesFM (`google-research/timesfm`).** Time-series
+forecasting foundation model architecture ported to native zero-dependency TypeScript:
+- **Patch-based sequential tokenization & normalization:** groups sequential crawl/search
+  observations into multi-scale patches, normalizing local variance to resist sudden outliers.
+- **Zero-shot multi-horizon projection:** projects arbitrary horizon lengths ($T+1$ through
+  $T+365$) with empirical P10, P50, and P90 quantile confidence bounds that expand over time.
+- **Frequency conditioning:** native support for daily, weekly, monthly, and event-based crawl
+  intervals with harmonic seasonal cycle detection.
+- **In-sample anomaly detection:** utilizes robust Median Absolute Deviation (MAD) residual
+  scoring to flag sudden traffic drops, algorithm penalty drops, or error spikes without
+  contamination from outlier inflation.
+- **Direct SEO metrics:** seamlessly forecasts AEO scores, critical errors, warnings, notices,
+  crawled URL volumes, Core Web Vitals, or custom user-supplied time series.
+
+---
+
+## 10. Background Task & Process Engine (Crawlee, p-queue & Litestream)
+
+SEOForge implements background processing patterns inspired by industry-standard background task architectures:
+- **`src/crawl/queue.ts` — Event-Driven Zero-Polling Task Slot Resolution (p-queue / Crawlee):** Replaces busy-wait spin loops (`setTimeout(25)`) with an event-driven `waitForItem()` slot notification. Waiting worker threads wake up on the exact microtask new URLs are enqueued (0ms task pickup latency vs 25ms timer lag).
+- **`src/crawl/crawler.ts` — Exponential Retry with Full Jitter (Crawlee RequestQueue / AWS Architecture):** Transient failures (HTTP 429 rate limits, HTTP 503 overloads, connection drops) are automatically re-queued with exponential backoff and randomized jitter: $\min(8000, 1000 \cdot 2^{\text{retry}} + \text{jitter})$, honoring `Retry-After` response headers without dropping crawl data.
+- **`src/api/server.ts` — Event-Driven SSE Stream Backpressure:** Replaces timer-based polling (`while(running) setTimeout(500)`) with event-driven lifecycle listeners (`crawler.once("done")` and `signal.onabort`), eliminating 100% of background timer wakeups for connected clients.
+- **`src/store/db.ts` — Passive WAL Checkpointing (Litestream / SQLite Daemon Pattern):** Flushes accumulated write-ahead log pages (`checkpointStore`) in the background after crawl batch transactions without locking active readers or writers, preventing SQLite WAL disk bloat.
+
+---
+
+## 11. Conventions & gotchas
 
 - **Node ≥ 22 is mandatory** — `node:sqlite`. Enforced in `engines` and in CI.
 - **Never commit `reports/`** — the DB, WAL/SHM sidecars, and all generated reports are
@@ -381,7 +451,7 @@ Competitors).
 
 ---
 
-## 10. Quality gates (run these before declaring done)
+## 12. Quality gates (run these before declaring done)
 
 ```bash
 npm run typecheck         # engine types

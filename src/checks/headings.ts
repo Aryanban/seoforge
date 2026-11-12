@@ -75,7 +75,7 @@ export function headingChecks(ctx: PageCheckContext): CheckOutput {
   }
 
   // Heading hierarchy: detect skips (e.g. H1 → H3)
-  const $ = cheerio.load(html);
+  const $ = ctx.$ ?? cheerio.load(html);
   let lastLevel = 0;
   let skipped = false;
   $(":header").each((_, el) => {

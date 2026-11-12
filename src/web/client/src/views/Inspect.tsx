@@ -226,14 +226,14 @@ function OverviewTab({ result }: { result: InspectResult }) {
                   </Badge>
                 ))}
               </div>
-              {p.schema.missingExpected?.length > 0 && (
+              {(p.schema.missingExpected?.length ?? 0) > 0 && (
                 <div className="text-xs text-warn mb-2">
-                  Missing expected entities: {p.schema.missingExpected.join(", ")}
+                  Missing expected entities: {p.schema.missingExpected?.join(", ")}
                 </div>
               )}
-              {p.schema.errors?.length > 0 && (
+              {(p.schema.errors?.length ?? 0) > 0 && (
                 <ul className="text-xs text-err space-y-1 list-disc pl-4">
-                  {p.schema.errors.map((e, i) => (
+                  {p.schema.errors?.map((e: string, i: number) => (
                     <li key={i}>{e}</li>
                   ))}
                 </ul>

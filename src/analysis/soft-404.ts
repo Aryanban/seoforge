@@ -12,7 +12,9 @@ export interface Soft404CheckResult {
 }
 
 const TITLE_404_PATTERNS = [
-  /\b404\b/i,
+  /^\s*404\b/i,
+  /\b404\b\s*[-:|–—]?\s*(error|not found|page)/i,
+  /\b(error|page)\s*[-:]?\s*404\b/i,
   /\bpage not found\b/i,
   /\bnot found\b/i,
   /\barticle not found\b/i,
@@ -24,7 +26,9 @@ const TITLE_404_PATTERNS = [
 ];
 
 const H1_404_PATTERNS = [
-  /\b404\b/i,
+  /^\s*404\b/i,
+  /\b404\b\s*[-:|–—]?\s*(error|not found|page)/i,
+  /\b(error|page)\s*[-:]?\s*404\b/i,
   /\bnot found\b/i,
   /\bpage cannot be found\b/i,
   /\blooking for doesn['’]t exist\b/i,
@@ -56,6 +60,7 @@ export function checkSoft404(page: {
 
   const signals: string[] = [];
   let score = 0;
+  let bodySignalFired = false;
 
   const title = (page.title || "").trim();
   const h1 = (page.h1Text || "").trim();
@@ -94,6 +99,7 @@ export function checkSoft404(page: {
     if (body.includes("not found") || body.includes("removed") || body.includes("error") || body.includes("expired")) {
       signals.push(`Thin content (${words} words) containing missing/error phrases in body`);
       score += 30;
+      bodySignalFired = true;
     } else if (words < 20 && !title && !h1) {
       signals.push(`Practically blank page (<20 words, no title or H1)`);
       score += 25;
@@ -105,7 +111,14 @@ export function checkSoft404(page: {
     if (body.includes("0 results") || body.includes("no results found") || body.includes("did not match any")) {
       signals.push(`Internal search page with zero search results returned as 200 OK`);
       score += 35;
+      bodySignalFired = true;
     }
+  }
+
+  // 6. Content-volume guard: a long, substantive page with no body-level
+  // error signal cannot be classified as soft 404 on title/H1 alone.
+  if (words >= 300 && !bodySignalFired) {
+    score *= 0.5;
   }
 
   const isSoft404 = score >= 45;
