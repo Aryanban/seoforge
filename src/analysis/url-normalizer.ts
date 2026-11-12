@@ -122,6 +122,13 @@ export function cleanAndNormalizeUrl(rawUrl: string, options: NormalizationOptio
  * E.g., /shop/shoes/shop/shoes/shop/shoes or /blog/category/blog/category
  */
 export function isCrawlTrapLoop(url: string, maxSegmentRepetition = 2): boolean {
+  // Fast path: must have at least 4 slashes after origin to have 4 path segments
+  let slashCount = 0;
+  for (let i = 8; i < url.length; i++) {
+    if (url.charCodeAt(i) === 47 && ++slashCount >= 4) break;
+  }
+  if (slashCount < 4) return false;
+
   try {
     const parsed = new URL(url);
     const segments = parsed.pathname.split("/").filter(Boolean);

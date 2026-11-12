@@ -2,6 +2,7 @@
  * XML sitemap parsing — supports sitemap indexes (nested), lastmod, changefreq, priority.
  */
 import { XMLParser } from "fast-xml-parser";
+import { gunzipSync } from "node:zlib";
 import { SitemapEntry } from "../types.js";
 import { fetchPage } from "./fetcher.js";
 
@@ -29,20 +30,33 @@ export async function parseSitemap(
   const errors: string[] = [];
   const visited = new Set<string>([sitemapUrl]);
 
-  async function parseOne(url: string, depth: number): Promise<void> {
+  async function parseOne(url: string, depth: number, initialHtml?: string): Promise<void> {
     if (depth > maxDepth) return;
     if (entries.length >= limit) return;
 
-    const res = await fetchPage(url, { timeoutMs, method: "GET" });
-    if (res.status !== 200 || !res.html) {
-      if (depth === 0) return; // accessibility reported by caller
-      errors.push(`Sitemap ${url} returned HTTP ${res.status}`);
-      return;
+    let xmlText = initialHtml;
+    if (!xmlText) {
+      const res = await fetchPage(url, { timeoutMs, method: "GET" });
+      if (res.status !== 200 || !res.html) {
+        if (depth === 0) return; // accessibility reported by caller
+        errors.push(`Sitemap ${url} returned HTTP ${res.status}`);
+        return;
+      }
+      xmlText = res.html;
+    }
+
+    // Auto-decompress gzipped sitemaps (.xml.gz or magic bytes 0x1f 0x8b)
+    if (url.endsWith(".gz") || (xmlText.charCodeAt(0) === 0x1f && xmlText.charCodeAt(1) === 0x8b)) {
+      try {
+        xmlText = gunzipSync(Buffer.from(xmlText, "binary")).toString("utf-8");
+      } catch {
+        /* proceed with raw text if decompression fails */
+      }
     }
 
     let parsed: any;
     try {
-      parsed = xmlParser.parse(res.html);
+      parsed = xmlParser.parse(xmlText);
     } catch (err: any) {
       errors.push(`Sitemap ${url} contains invalid XML: ${err.message}`);
       return;
@@ -93,7 +107,7 @@ export async function parseSitemap(
   const res = await fetchPage(sitemapUrl, { timeoutMs, method: "GET" });
   const accessible = res.status === 200 && !!res.html;
   if (accessible) {
-    await parseOne(sitemapUrl, 0);
+    await parseOne(sitemapUrl, 0, res.html);
   }
 
   return {

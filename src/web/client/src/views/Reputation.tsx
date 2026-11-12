@@ -145,7 +145,7 @@ export default function Reputation() {
                 <span className="text-[10px] uppercase tracking-wide text-faint">Candidate source URLs (one per line)</span>
                 <Button 
                   onClick={discoverSources} 
-                  variant="secondary" 
+                  variant="default" 
                   disabled={discovering || busy}
                   className="text-[10px] py-1 px-2.5"
                 >

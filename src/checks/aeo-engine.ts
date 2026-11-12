@@ -6,8 +6,10 @@
 import * as cheerio from "cheerio";
 import { AeoScoreResult } from "../types.js";
 
-export function evaluateAeo(html: string): AeoScoreResult {
-  const $ = cheerio.load(html);
+export function evaluateAeo(htmlOrCheerio: string | cheerio.CheerioAPI, rawHtml?: string): AeoScoreResult {
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
+  const jsonLdContent = $('script[type="application/ld+json"]').text();
+  const html = typeof htmlOrCheerio === "string" ? htmlOrCheerio : (rawHtml || jsonLdContent);
   const recommendations: string[] = [];
   let score = 0;
 
@@ -40,8 +42,22 @@ export function evaluateAeo(html: string): AeoScoreResult {
 
   $("h1, h2").each((_, heading) => {
     if (hasInvertedPyramidSnippet) return;
-    const nextElem = $(heading).next();
-    const text = nextElem.is("p") ? nextElem.text().trim() : nextElem.find("p").first().text().trim();
+    // First paragraph that follows the heading in document order. Headings are often
+    // wrapped (badges, flex containers), so also look past the wrapper's siblings —
+    // limited to the next few blocks so a distant paragraph is not credited.
+    let text = "";
+    let cursor: any = $(heading);
+    for (let level = 0; level < 3 && !text && cursor.length; level++) {
+      const following = cursor.nextAll().slice(0, 3).toArray();
+      for (const el of following) {
+        const $el = $(el);
+        if ($el.is("h1, h2, h3")) break;
+        const p = $el.is("p") ? $el : $el.find("p").first();
+        const t = p.text().trim();
+        if (t) { text = t; break; }
+      }
+      cursor = cursor.parent();
+    }
     if (text) {
       const words = text.split(/\s+/).filter(Boolean);
       if (words.length >= 25 && words.length <= 75) {

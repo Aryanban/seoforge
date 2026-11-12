@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS pages (
   PRIMARY KEY (crawl_id, normalized_url)
 );
 CREATE INDEX IF NOT EXISTS idx_pages_crawl ON pages(crawl_id);
+CREATE INDEX IF NOT EXISTS idx_pages_crawl_depth_url ON pages(crawl_id, depth, url);
 
 CREATE TABLE IF NOT EXISTS issues (
   crawl_id TEXT NOT NULL,
@@ -74,6 +75,9 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 CREATE INDEX IF NOT EXISTS idx_issues_crawl ON issues(crawl_id);
 CREATE INDEX IF NOT EXISTS idx_issues_crawl_sev ON issues(crawl_id, severity);
+CREATE INDEX IF NOT EXISTS idx_issues_grouping ON issues(crawl_id, name, severity, category, page_url);
+CREATE INDEX IF NOT EXISTS idx_issues_crawl_name_url ON issues(crawl_id, name, page_url);
+CREATE INDEX IF NOT EXISTS idx_issues_crawl_page ON issues(crawl_id, page_url);
 
 CREATE TABLE IF NOT EXISTS links (
   crawl_id TEXT NOT NULL,
@@ -87,6 +91,8 @@ CREATE TABLE IF NOT EXISTS links (
   is_redirect INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_links_crawl ON links(crawl_id);
+CREATE INDEX IF NOT EXISTS idx_links_crawl_broken ON links(crawl_id, is_broken, target);
+CREATE INDEX IF NOT EXISTS idx_links_crawl_internal ON links(crawl_id, is_internal, target);
 
 CREATE TABLE IF NOT EXISTS sitemap_urls (
   crawl_id TEXT NOT NULL,
@@ -197,6 +203,10 @@ export function openStore(dbPath?: string): DatabaseSync {
   const db = new DatabaseSync(resolved);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA cache_size = -64000");
+  db.exec("PRAGMA mmap_size = 268435456");
+  db.exec("PRAGMA temp_store = MEMORY");
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(SCHEMA_SQL);
   dbInstance = db;
   currentDbPath = resolved;
@@ -212,8 +222,28 @@ function ensureDirSync(filePath: string): void {
   }
 }
 
+/**
+ * Passive WAL checkpoint — flushes accumulated write-ahead log pages back
+ * to the main database file without blocking active readers or writers.
+ * Litestream / SQLite high-throughput background pattern.
+ */
+export function checkpointStore(db?: DatabaseSync): void {
+  const target = db || dbInstance;
+  if (!target) return;
+  try {
+    target.exec("PRAGMA wal_checkpoint(PASSIVE)");
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export function closeStore(): void {
   if (dbInstance) {
+    try {
+      dbInstance.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    } catch {
+      /* non-fatal */
+    }
     dbInstance.close();
     dbInstance = null;
     currentDbPath = null;

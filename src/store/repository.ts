@@ -2,6 +2,7 @@
  * Repository — typed query layer over the SQLite store.
  */
 import { DatabaseSync } from "node:sqlite";
+import { checkpointStore } from "./db.js";
 import {
   AuditIssue,
   CrawlResult,
@@ -152,6 +153,7 @@ export function saveCrawl(db: DatabaseSync, result: CrawlResult): void {
       );
     }
     tx("COMMIT");
+    checkpointStore(db);
   } catch (err) {
     tx("ROLLBACK");
     throw err;
@@ -517,7 +519,7 @@ export function getFullCrawl(db: DatabaseSync, crawlId: string): CrawlResult | n
   const base = getCrawl(db, crawlId);
   if (!base) return null;
 
-  const { rows: pages } = getPages(db, crawlId, { pageSize: 5000 });
+  const { rows: pages } = getPages(db, crawlId, { pageSize: 500000 });
   const allIssues = listAuditIssues(db, crawlId);
   const issuesByUrl = new Map<string, AuditIssue[]>();
   for (const i of allIssues) {
@@ -531,9 +533,9 @@ export function getFullCrawl(db: DatabaseSync, crawlId: string): CrawlResult | n
     p.issues = pi.map((i) => `[${i.severity}] ${i.name}`);
   }
 
-  const { rows: links } = getLinks(db, crawlId, { pageSize: 20000 });
+  const { rows: links } = getLinks(db, crawlId, { pageSize: 1000000 });
   const recommendations = getRecommendations(db, crawlId);
-  const sitemaps = getSitemapUrls(db, crawlId, 5000);
+  const sitemaps = getSitemapUrls(db, crawlId, 500000);
 
   return {
     ...base,

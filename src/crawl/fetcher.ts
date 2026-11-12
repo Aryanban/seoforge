@@ -1,8 +1,63 @@
 /**
  * HTTP fetcher with timeout, TTFB timing, and redirect tracking.
  */
+import { Agent } from "undici";
+import * as dns from "node:dns";
 
 const DEFAULT_UA = "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)";
+
+// High-performance in-memory DNS cache to eliminate libuv threadpool contention
+interface DnsEntry {
+  address: string | dns.LookupAddress[];
+  family: number;
+  expires: number;
+}
+const dnsCache = new Map<string, DnsEntry>();
+const DNS_TTL_MS = 60_000;
+
+function cachedLookup(
+  hostname: string,
+  options: any,
+  callback: (err: NodeJS.ErrnoException | null, address: any, family?: number) => void
+): void {
+  const cb = typeof options === "function" ? options : callback;
+  const opts = typeof options === "function" ? {} : options;
+  const isAll = opts && typeof opts === "object" && opts.all;
+  const cacheKey = `${hostname}:${isAll ? "all" : "single"}`;
+
+  const entry = dnsCache.get(cacheKey);
+  if (entry && Date.now() < entry.expires) {
+    if (isAll) return cb(null, entry.address);
+    return cb(null, entry.address as string, entry.family);
+  }
+
+  dns.lookup(hostname, opts, (err, address, family) => {
+    if (!err && address) {
+      dnsCache.set(cacheKey, {
+        address,
+        family: family || 4,
+        expires: Date.now() + DNS_TTL_MS,
+      });
+      if (dnsCache.size > 5000) {
+        const now = Date.now();
+        for (const [k, v] of dnsCache) {
+          if (v.expires < now) dnsCache.delete(k);
+        }
+      }
+    }
+    if (isAll) cb(err, address);
+    else cb(err, address, family);
+  });
+}
+
+// Persistent keep-alive connection pool across all crawl requests
+const crawlerDispatcher = new Agent({
+  keepAliveTimeout: 60000,
+  keepAliveMaxTimeout: 120000,
+  connections: 128,
+  pipelining: 1,
+  connect: { lookup: cachedLookup },
+});
 
 export interface FetchResult {
   status: number;
@@ -54,18 +109,22 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
 
   try {
     while (true) {
+      const hopStart = Date.now();
       const res = await fetch(current, {
         method,
         signal: controller.signal,
         redirect: "manual",
+        dispatcher: crawlerDispatcher,
         headers: {
           "User-Agent": userAgent,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
+          Connection: "keep-alive",
         },
-      });
-      ttfb = ttfb || Date.now() - start;
+      } as any);
+      const hopTtfb = Date.now() - hopStart;
+      ttfb = ttfb || hopTtfb;
 
       const status = res.status;
       const location = res.headers.get("location");
@@ -203,4 +262,8 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
   }
 }
 
-export { DEFAULT_UA };
+function closeCrawlerPool(): void {
+  crawlerDispatcher.destroy();
+}
+
+export { DEFAULT_UA, crawlerDispatcher, closeCrawlerPool };

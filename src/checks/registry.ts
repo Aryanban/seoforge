@@ -81,6 +81,8 @@ export interface PageCheckContext {
   pageUrl: string;
   finalUrl: string;
   html: string;
+  /** Pre-parsed document shared by all checks (parse once per page). */
+  $?: cheerio.CheerioAPI;
   status: number;
   responseTimeMs: number;
   ttfbMs?: number;
@@ -141,14 +143,16 @@ function normalizeForCompare(rawUrl: string): string {
 }
 
 export function extractPageMeta(
-  html: string,
+  htmlOrCheerio: string | cheerio.CheerioAPI,
   pageUrl: string,
   finalUrl: string,
   headers: Record<string, string>,
   expectedEntities: string[],
-  canonicalPolicy: CanonicalPolicy
+  canonicalPolicy: CanonicalPolicy,
+  rawHtml?: string
 ): PageMeta {
-  const $ = cheerio.load(html);
+  const $ = typeof htmlOrCheerio === "string" ? cheerio.load(htmlOrCheerio) : htmlOrCheerio;
+  const html = typeof htmlOrCheerio === "string" ? htmlOrCheerio : (rawHtml || "");
 
   const title = $("title").first().text().trim();
   const titleCount = $("title").length;
@@ -182,16 +186,14 @@ export function extractPageMeta(
   }
 
   // H1 counting — Ahrefs standard: H1 inside <noscript> does not count
-  const mainDom = cheerio.load(html);
-  mainDom("noscript").remove();
-  const domH1s = mainDom("h1");
+  const allH1s = $("h1");
+  const domH1s = allH1s.filter((_, el) => $(el).parents("noscript").length === 0);
   const h1Count = domH1s.length;
   const h1Text = h1Count > 0 ? domH1s.first().text().trim() : undefined;
-  const allH1s = $("h1");
   // cheerio parses <noscript> content as raw text, so an H1 that only exists
   // inside a <noscript> fallback never surfaces as a DOM node. Scan the source.
   const h1InNoscriptOnly =
-    h1Count === 0 && (allH1s.length > 0 || /<noscript[^>]*>[\s\S]*?<h1[\s>]/i.test(html));
+    h1Count === 0 && (allH1s.length > 0 || (html ? /<noscript[^>]*>[\s\S]*?<h1[\s>]/i.test(html) : false));
 
   const hreflang: string[] = [];
   $('link[rel="alternate"][hreflang]').each((_, el) => {
@@ -220,8 +222,8 @@ export function extractPageMeta(
   const xRobots = (headers["x-robots-tag"] || "").toLowerCase();
   const xRobotsNoindex = xRobots.includes("noindex");
 
-  const schema = validateSchemaOrg(html, expectedEntities);
-  const aeo = evaluateAeo(html);
+  const schema = validateSchemaOrg($, expectedEntities);
+  const aeo = evaluateAeo($, html);
 
   return {
     title,
@@ -239,7 +241,7 @@ export function extractPageMeta(
     h1Text,
     h2Count: $("h2").length,
     h1InNoscriptOnly,
-    wordCount: countWords(extractVisibleText(html)),
+    wordCount: countWords(extractVisibleText($)),
     hreflang,
     openGraph: {
       title: ogTitle,
@@ -293,12 +295,13 @@ export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckRes
   const hasHtml = ctx.html && ctx.html.length > 0;
   const meta = hasHtml
     ? extractPageMeta(
-        ctx.html,
+        ctx.$ ?? ctx.html,
         ctx.pageUrl,
         ctx.finalUrl,
         ctx.headers,
         ctx.expectedEntities,
-        ctx.canonicalPolicy
+        ctx.canonicalPolicy,
+        ctx.html
       )
     : emptyPageMeta(ctx.expectedEntities);
 
