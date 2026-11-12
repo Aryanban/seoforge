@@ -48,6 +48,7 @@ import { compareCompetitors, comparisonMarkdown } from "./competitors/index.js";
 import { compareCrawls, formatCrawlDiffMarkdown } from "./analysis/crawl-diff.js";
 import { analyzeLogs } from "./analysis/log-parser.js";
 import { detectCannibalization } from "./analysis/cannibalization.js";
+import { estimateVolumes, createTrendsFetcher, autocomplete, type GscAnchor } from "./keyword-volume.js";
 import { scoreContent } from "./analysis/live-content-scorer.js";
 import { evaluateCiGate } from "./analysis/ci-gate.js";
 import { analyzeLinkIntersect, formatLinkIntersectMarkdown } from "./analysis/link-intersect.js";
@@ -1078,6 +1079,55 @@ program
     if (options.out) {
       await fs.writeFile(options.out, JSON.stringify(report, null, 2), "utf-8");
       console.log(green(`\n✔ Cannibalization report → ${options.out}`));
+    }
+  });
+
+/* ------------------------------------------------------------------ */
+/* Command: volume — monthly search volume from GSC anchors + Trends    */
+/* ------------------------------------------------------------------ */
+program
+  .command("volume")
+  .description("Estimate monthly search volume: GSC impressions as anchors, Google Trends ladder for relative demand")
+  .option("--keywords <list>", "Comma-separated keywords")
+  .option("--keywords-file <path>", "File with one keyword per line")
+  .option("--seed <text>", "Add Google Autocomplete suggestions for this seed (a-z expanded)")
+  .option("--anchors <path>", "GSC searchAnalytics rows JSON ([{keys:[query], impressions, position}])")
+  .option("--anchor-days <n>", "Days covered by the anchors file", "30")
+  .requiredOption("--pivot <keyword>", "Highest-demand keyword, the top of the Trends ladder")
+  .option("--geo <code>", "Trends country code", "IN")
+  .option("--out <path>", "Save results as JSON to path")
+  .action(async (options) => {
+    let keywords: string[] = [];
+    if (options.keywords) keywords.push(...String(options.keywords).split(","));
+    if (options.keywordsFile) keywords.push(...(await fs.readFile(options.keywordsFile, "utf-8")).split("\n"));
+    if (options.seed) keywords.push(...(await autocomplete(options.seed, { gl: String(options.geo).toLowerCase(), expand: true })));
+    keywords = [...new Set(keywords.map((k) => k.trim().toLowerCase()).filter(Boolean))];
+    if (!keywords.length) {
+      console.error(red("Pass --keywords, --keywords-file or --seed."));
+      process.exit(1);
+    }
+    const days = Number(options.anchorDays);
+    const anchors: GscAnchor[] = options.anchors
+      ? (JSON.parse(await fs.readFile(options.anchors, "utf-8")) as { keys: string[]; impressions: number; position: number }[])
+          .map((r) => ({ query: r.keys[0], impressions: r.impressions, position: r.position, days }))
+      : [];
+    console.log(gray(`Estimating ${keywords.length} keywords against pivot "${options.pivot}" (${anchors.length} GSC rows)...`));
+    const result = await estimateVolumes({ keywords, anchors, pivot: options.pivot, fetchTrends: createTrendsFetcher({ geo: options.geo }) });
+    console.log(bold(cyan("\nKeyword volume estimates (monthly searches)")));
+    if (result.rateLimited) console.log(yellow("Google Trends rate-limited this run: partial results. Re-run later; finished comparisons come from cache."));
+    console.log(gray(`Calibration: ${result.anchorsUsed.length} GSC anchor(s)${result.scale ? `, pivot ≈ ${Math.round(result.scale)}/mo` : ", none resolved in Trends — relative only"}`));
+    const rows = [...result.estimates].sort((a, b) => (b.monthly ?? -1) - (a.monthly ?? -1) || (b.relative ?? 0) - (a.relative ?? 0));
+    for (const e of rows) {
+      const v = e.monthly != null ? `${e.monthly} (${e.low}-${e.high})`
+        : e.method === "trends-error" ? (e.low ? `≥ ${e.low} (error)` : "error")
+        : e.low ? `≥ ${e.low}`
+        : e.high != null ? `< ${e.high}`
+        : e.relative != null ? `rel ${e.relative.toFixed(3)}` : "n/a";
+      console.log(`  ${e.keyword.padEnd(48)} ${v.padEnd(18)} ${gray(`${e.method}, ${e.confidence}`)}`);
+    }
+    if (options.out) {
+      await fs.writeFile(options.out, JSON.stringify(result, null, 2), "utf-8");
+      console.log(green(`\n✔ Volume estimates → ${options.out}`));
     }
   });
 
