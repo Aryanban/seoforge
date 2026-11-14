@@ -36,19 +36,6 @@ function wordsOf(bodyText: string): string[] {
   return n ? n.split(" ") : [];
 }
 
-function shingleSet(words: string[], n = 5): Set<string> {
-  const set = new Set<string>();
-  if (words.length === 0) return set;
-  if (words.length <= n) {
-    set.add(words.join(" "));
-    return set;
-  }
-  for (let i = 0; i + n <= words.length; i++) {
-    set.add(words.slice(i, i + n).join(" "));
-  }
-  return set;
-}
-
 export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   const [small, large] = a.size <= b.size ? [a, b] : [b, a];
@@ -109,7 +96,14 @@ function hashedShingles(words: string[], n: number): Uint32Array {
   if (words.length <= n) {
     if (words.length) set.add(fnv1a(words.join(" ")));
   } else {
-    for (let i = 0; i + n <= words.length; i++) set.add(fnv1a(words.slice(i, i + n).join(" ")));
+    // Hash each word once, then mix n word hashes per shingle (no string building).
+    const wh = new Uint32Array(words.length);
+    for (let i = 0; i < words.length; i++) wh[i] = fnv1a(words[i]);
+    for (let i = 0; i + n <= words.length; i++) {
+      let h = 0x811c9dc5;
+      for (let k = 0; k < n; k++) h = Math.imul(h ^ wh[i + k], 0x01000193) ^ (h >>> 15);
+      set.add(h >>> 0);
+    }
   }
   return Uint32Array.from(set).sort();
 }
@@ -156,40 +150,53 @@ function minhash(shingles: Uint32Array): Uint32Array {
  * Each page is reported once, against its most similar page, with the number
  * of near-duplicates found (Screaming Frog "Closest Similarity Match" parity).
  */
+/**
+ * Per-page duplicate features, computed once (on a worker thread during a
+ * crawl) so the crawler keeps ~KBs of hashes instead of the full body text.
+ */
+export interface DuplicateFeatures {
+  fp: string;
+  shingles: Uint32Array;
+  sig: Uint32Array;
+}
+
+export function duplicateFeatures(bodyText: string, minWords = 40): DuplicateFeatures | null {
+  const words = wordsOf(bodyText);
+  if (words.length < minWords) return null;
+  const shingles = hashedShingles(words, DUPLICATE_SHINGLE_SIZE);
+  return { fp: fingerprintBodyText(bodyText), shingles, sig: minhash(shingles) };
+}
+
 export function detectDuplicates(pages: DuplicatePageInput[]): DuplicateReport {
-  interface ProcessedPage {
-    url: string;
-    words: string[];
-    fp: string;
-  }
-
-  const processed: ProcessedPage[] = [];
-  const byFingerprint = new Map<string, string[]>();
-
-  // Single-pass normalization and exact fingerprinting O(N * words)
+  const items: Array<{ url: string; features: DuplicateFeatures }> = [];
   for (const p of pages) {
-    const words = wordsOf(p.bodyText);
-    if (words.length < (p.minWords ?? 40)) continue;
-    const fp = fingerprintBodyText(p.bodyText);
-    processed.push({ url: p.url, words, fp });
-    const group = byFingerprint.get(fp) || [];
-    group.push(p.url);
-    byFingerprint.set(fp, group);
+    const features = duplicateFeatures(p.bodyText, p.minWords ?? 40);
+    if (features) items.push({ url: p.url, features });
   }
+  return detectDuplicatesFromFeatures(items);
+}
 
+/** Exact groups by fingerprint + MinHash/LSH near-duplicates verified by exact shingle Jaccard. */
+export function detectDuplicatesFromFeatures(items: Array<{ url: string; features: DuplicateFeatures }>): DuplicateReport {
+  const byFingerprint = new Map<string, string[]>();
+  for (const { url, features } of items) {
+    const group = byFingerprint.get(features.fp);
+    if (group) group.push(url);
+    else byFingerprint.set(features.fp, [url]);
+  }
   const exactGroups = Array.from(byFingerprint.values()).filter((g) => g.length > 1);
 
-  // Tier 2: one representative per exact-fingerprint group (exact dups are already reported).
-  const reps: ProcessedPage[] = [];
+  // One representative per exact-fingerprint group (exact dups are already reported).
+  const reps: Array<{ url: string; features: DuplicateFeatures }> = [];
   const seenFp = new Set<string>();
-  for (const p of processed) {
-    if (seenFp.has(p.fp)) continue;
-    seenFp.add(p.fp);
-    reps.push(p);
+  for (const it of items) {
+    if (seenFp.has(it.features.fp)) continue;
+    seenFp.add(it.features.fp);
+    reps.push(it);
   }
   const n = reps.length;
-  const shingles = reps.map((p) => hashedShingles(p.words, DUPLICATE_SHINGLE_SIZE));
-  const sigs = shingles.map(minhash);
+  const shingles = reps.map((p) => p.features.shingles);
+  const sigs = reps.map((p) => p.features.sig);
 
   // LSH buckets: band index + band values → page indices
   const buckets = new Map<string, number[]>();

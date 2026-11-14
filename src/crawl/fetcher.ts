@@ -56,6 +56,9 @@ const crawlerDispatcher = new Agent({
   keepAliveMaxTimeout: 120000,
   connections: 128,
   pipelining: 1,
+  // Negotiate HTTP/2 via ALPN where the server offers it (Googlebot does too);
+  // falls back to HTTP/1.1 keep-alive otherwise.
+  allowH2: true,
   connect: { lookup: cachedLookup },
 });
 
@@ -83,6 +86,8 @@ export interface FetchOptions {
   method?: "GET" | "HEAD";
   followRedirects?: boolean;
   maxRedirects?: number;
+  /** GET for the status only: cancel the body stream instead of downloading it. */
+  discardBody?: boolean;
 }
 
 export async function fetchPage(url: string, options: FetchOptions = {}): Promise<FetchResult> {
@@ -120,7 +125,6 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
         },
       } as any);
       const hopTtfb = Date.now() - hopStart;
@@ -141,7 +145,9 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
         const isHtmlOrXml = /text\/html|application\/xhtml\+xml|application\/xml|text\/xml/i.test(cType);
         const cLength = parseInt(res.headers.get("content-length") || "0", 10);
 
-        if (method === "GET" && status < 400) {
+        if (options.discardBody) {
+          await res.body?.cancel().catch(() => {});
+        } else if (method === "GET" && status < 400) {
           if (!isHtmlOrXml && /image\/|video\/|audio\/|application\/pdf|application\/zip|font\//.test(cType)) {
             html = "";
           } else if (cLength > 10 * 1024 * 1024) {

@@ -5,6 +5,7 @@
  */
 import { Command } from "commander";
 import fs from "fs/promises";
+import { existsSync } from "node:fs";
 import path from "path";
 import { green, red, cyan, bold, yellow, gray } from "colorette";
 import {
@@ -13,7 +14,7 @@ import {
   DomainAuditResult,
   OverallAuditReport,
 } from "./types.js";
-import { crawlSite } from "./crawl/crawler.js";
+import { crawlSite, Crawler, crawlIdId } from "./crawl/crawler.js";
 import { auditSinglePage } from "./audit-page.js";
 import { submitToIndexNow } from "./indexnow.js";
 import {
@@ -131,6 +132,7 @@ program
   .option("-d, --depth <n>", "Maximum crawl depth", "10")
   .option("-l, --limit <n>", "Crawl budget (max pages)", "1000")
   .option("-c, --concurrency <n>", "Concurrent requests", "12")
+  .option("--max-rps <n>", "Max requests per second to the site (0 = uncapped; use only on sites you own)")
   .option("-r, --render", "Enable Playwright JS rendering for SPAs")
   .option("--reach", "Enable Agent Reach engine for login-walled/anti-bot platforms (Reddit, Twitter, YouTube, etc.)")
   .option("-s, --strategy <strategy>", "Crawl strategy: discover | sitemap | config", "discover")
@@ -141,6 +143,7 @@ program
   .option("--sitemap <url>", "Use this sitemap URL instead of auto-discovering one")
   .option("--seeds <file>", "File of extra seed URLs (one per line; blank lines and # comments ignored)")
   .option("--production-origin <origin>", "Production origin for staging/local audits (rewrites sitemap/seed URLs and treats its canonical/hreflang/og URLs as same-site)")
+  .option("--resume <crawlId>", "Resume an interrupted or stopped crawl from its checkpoint (same URL)")
   .option("--all-sitemap", "Crawl every sitemap URL: sets strategy=sitemap and raises the default limit to 200000")
   .action(async (url: string | undefined, options) => {
     const config = await loadConfig().catch(() => null);
@@ -195,13 +198,54 @@ program
       ...extra,
     };
     if (options.allSitemap) opts.strategy = "sitemap";
+    if (options.maxRps !== undefined) {
+      const rps = Number(options.maxRps);
+      if (!Number.isFinite(rps) || rps < 0) {
+        console.error(red(`Invalid --max-rps: ${options.maxRps}`));
+        process.exit(1);
+      }
+      opts.maxRequestsPerSecond = rps;
+    }
     if (options.sitemap) opts.sitemapOverride = options.sitemap;
     if (seedUrls) opts.seedUrls = seedUrls;
     if (productionOrigin) opts.productionOrigin = productionOrigin;
 
     console.log(bold(cyan(`\n🕸  Crawling ${targetUrl} (depth ${opts.maxDepth}, budget ${opts.limit}, strategy ${opts.strategy}${opts.render ? ", render mode" : ""}${opts.reach ? ", reach mode" : ""})…\n`)));
 
-    const result = await crawlSite(targetUrl, opts);
+    if (options.resume && !/^[\w-]+$/.test(options.resume)) {
+      console.error(red(`Invalid --resume id: ${options.resume}`));
+      process.exit(1);
+    }
+    const crawlId = crawlIdId(options.resume);
+    const checkpointPath = path.join(process.cwd(), "reports", "checkpoints", `${crawlId}.ckpt`);
+    if (options.resume && !existsSync(checkpointPath)) {
+      console.error(red(`No checkpoint for ${options.resume} at ${checkpointPath}`));
+      process.exit(1);
+    }
+    opts.checkpointPath = checkpointPath;
+    console.log(gray(`Crawl ID ${crawlId} · Ctrl-C stops and keeps a checkpoint; resume with --resume ${crawlId}\n`));
+
+    const crawler = new Crawler(crawlId);
+    let firstInt = 0;
+    process.on("SIGINT", () => {
+      if (!firstInt) {
+        firstInt = Date.now();
+        console.log(yellow("\nStopping… finishing in-flight pages and saving a checkpoint (Ctrl-C again to quit now)."));
+        crawler.stop();
+      } else if (Date.now() - firstInt > 1000) {
+        // A second, deliberate Ctrl-C (wrappers like npx re-send the first one at once).
+        if (crawler.checkpointNow()) console.log(yellow(`Checkpoint saved; resume with --resume ${crawlId}`));
+        process.exit(130);
+      }
+    });
+    // npx / kill / closed terminal: no time to finish in-flight pages, so save and exit now.
+    for (const sig of ["SIGTERM", "SIGHUP"] as const) {
+      process.once(sig, () => {
+        if (crawler.checkpointNow()) console.log(yellow(`\n${sig}: checkpoint saved; resume with --resume ${crawlId}`));
+        process.exit(sig === "SIGTERM" ? 143 : 129);
+      });
+    }
+    const result = await crawler.crawl(targetUrl, opts);
     console.log(formatCrawlTerminalOutput(result));
 
     if (result.recommendations.length > 0) {

@@ -209,7 +209,7 @@ export default function Publishing() {
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-faint mb-1">Target pages (one per line: url | topic)</div>
                 <textarea
-                  className="w-full bg-bg border border-border rounded-md p-2 text-xs text-white font-mono h-24"
+                  className="w-full bg-bg border border-border rounded-md p-2 text-xs text-text font-mono h-24"
                   placeholder={"https://example.com/guide | AI automation\nhttps://example.com/about | company background"}
                   value={form.pages}
                   onChange={(e) => setForm({ ...form, pages: e.target.value })}
@@ -249,7 +249,7 @@ export default function Publishing() {
                         </a>
                         <Badge className="bg-zinc-500/15 text-zinc-400">{t.format}</Badge>
                       </div>
-                      <div className="text-xs text-white mb-1">{t.suggested_title_or_action}</div>
+                      <div className="text-xs text-text mb-1">{t.suggested_title_or_action}</div>
                       <div className="text-[10px] text-muted">
                         Target: {t.target_page} · Week {t.suggested_week} ({t.suggested_date}) · {t.cost_status}
                       </div>
@@ -275,7 +275,7 @@ export default function Publishing() {
                 <tbody>
                   {plans.map((p) => (
                     <tr key={p.id} className="border-b border-border hover:bg-panel2/50">
-                      <td className="p-2.5 text-xs text-white">{p.business}</td>
+                      <td className="p-2.5 text-xs text-text">{p.business}</td>
                       <td className="p-2.5 text-xs text-muted truncate">{p.website}</td>
                       <td className="p-2.5 text-xs tabular-nums text-muted">{p.selectedSources} sources</td>
                       <td className="p-2.5 text-xs text-faint tabular-nums">{p.createdAt}</td>

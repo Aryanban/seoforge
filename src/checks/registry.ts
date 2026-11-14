@@ -32,6 +32,9 @@ import { aeoChecks } from "./aeo.js";
 import { documentChecks } from "./document.js";
 import { urlChecks } from "./url.js";
 import { accessibilityChecks } from "./accessibility.js";
+import { languageChecks } from "./language.js";
+import { headIntegrityChecks } from "./head-integrity.js";
+import { jsRenderingIssues } from "./js-rendering.js";
 
 export type { Thresholds } from "../types.js";
 import type { Thresholds } from "../types.js";
@@ -107,6 +110,8 @@ export interface PageCheckContext {
   /** First-hop HTTP status that produced the redirect (301/302/307/308). */
   redirectStatusCode?: number;
   isHttpToHttpsRedirect: boolean;
+  /** Raw server HTML when `html` is the rendered DOM (render mode), for JS diffing. */
+  rawHtml?: string;
 }
 
 export interface CheckOutput {
@@ -285,6 +290,11 @@ registerCheck("url", urlChecks);
 registerCheck("accessibility", accessibilityChecks);
 registerCheck("schema", schemaChecks);
 registerCheck("aeo", aeoChecks);
+registerCheck("language", languageChecks);
+registerCheck("head-integrity", headIntegrityChecks);
+registerCheck("js-rendering", (ctx) => ({
+  issues: ctx.rendered && ctx.rawHtml && ctx.$ && ctx.status === 200 ? jsRenderingIssues(ctx.rawHtml, ctx.$, ctx.pageUrl) : [],
+}));
 
 export interface PageCheckResult {
   page: import("../types.js").PageAuditResult;

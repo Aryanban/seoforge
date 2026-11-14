@@ -20,7 +20,8 @@ export type IssueCategory =
   | "Technical"
   | "Accessibility"
   | "Security"
-  | "International";
+  | "International"
+  | "JavaScript";
 
 export interface AuditIssue {
   id: string;
@@ -81,12 +82,20 @@ export interface CrawlOptions {
   timeoutMs?: number;
   followSitemap?: boolean;
   maxRetries?: number;
+  /** Worker threads for HTML parsing + checks (default cores-1, max 4; 0 = inline). */
+  pageWorkers?: number;
   // SEOForge 2.0 driver fields (passed through to the check engine)
   expectedEntities?: string[];
   thresholds?: Thresholds;
   paths?: string[];
   sitemapOverride?: string;
   seedUrls?: string[];
+  /**
+   * Checkpoint file. Crawl state is written here every 30 s and when the crawl
+   * is stopped; if the file exists when a crawl starts, it resumes from it.
+   * Deleted once the crawl completes.
+   */
+  checkpointPath?: string;
   /**
    * Production origin for staging/local audits (e.g. "https://example.com" while crawling http://localhost:3000).
    * Sitemap/seed URLs on this origin are rewritten to the crawl origin, and canonical/hreflang/og URLs on it

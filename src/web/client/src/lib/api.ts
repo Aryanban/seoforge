@@ -49,6 +49,16 @@ export interface IssueRow {
   recommendation: string;
 }
 
+export interface CrawlStats {
+  total: number;
+  health: { score: number; pagesWithErrors: number };
+  status: { key: string; label: string; count: number }[];
+  indexability: { indexable: number; nonIndexable: number; orphans: number };
+  responseTime: { avgMs: number; buckets: { label: string; count: number }[] };
+  depth: { depth: number; count: number }[];
+  categories: { category: string; errors: number; warnings: number; notices: number }[];
+}
+
 export interface PageRow {
   url: string;
   normalizedUrl: string;

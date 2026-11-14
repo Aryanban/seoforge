@@ -30,15 +30,32 @@ const CWV_INIT_SCRIPT = `
       const entries = list.getEntries();
       if (entries.length) window.__seoforgeCwv.lcp = Math.round(entries[entries.length - 1].startTime);
     });
+    // CLS per web-vitals: largest session window (shifts < 1s apart, window <= 5s),
+    // not the lifetime sum.
+    let sessionValue = 0, sessionFirst = 0, sessionLast = 0;
     po('layout-shift', (list) => {
-      let cls = 0;
-      for (const e of list.getEntries()) if (!e.hadRecentInput) cls += e.value;
-      window.__seoforgeCwv.cls = Math.round(cls * 1000) / 1000;
+      for (const e of list.getEntries()) {
+        if (e.hadRecentInput) continue;
+        if (sessionValue && e.startTime - sessionLast < 1000 && e.startTime - sessionFirst < 5000) {
+          sessionValue += e.value;
+        } else {
+          sessionValue = e.value;
+          sessionFirst = e.startTime;
+        }
+        sessionLast = e.startTime;
+        const cls = Math.round(sessionValue * 1000) / 1000;
+        if (cls > window.__seoforgeCwv.cls) window.__seoforgeCwv.cls = cls;
+      }
     });
-    po('interaction', (list) => {
-      const entries = list.getEntries();
-      if (entries.length) window.__seoforgeCwv.inp = Math.round(entries[entries.length - 1].duration);
-    });
+    // INP comes from 'event' timing entries ('interaction' is not an entry type).
+    // A lab load has no user input, so this stays 0 unless the page is interacted with.
+    try {
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.interactionId && e.duration > window.__seoforgeCwv.inp) window.__seoforgeCwv.inp = Math.round(e.duration);
+        }
+      }).observe({ type: 'event', buffered: true, durationThreshold: 40 });
+    } catch (e) { /* event timing unsupported */ }
     po('paint', (list) => {
       for (const e of list.getEntries()) if (e.name === 'first-contentful-paint') window.__seoforgeCwv.fcp = Math.round(e.startTime);
     });
@@ -130,12 +147,26 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     await page.addInitScript(CWV_INIT_SCRIPT);
 
     const response = await page.goto(url, { timeout: timeoutMs, waitUntil });
+    // `load` can fire before the first paint, leaving FCP/LCP empty. Wait for an
+    // LCP entry (bounded), then two frames so pending paints and shifts land.
+    await page
+      .waitForFunction(() => (window as any).__seoforgeCwv?.lcp > 0, null, { timeout: 3000 })
+      .catch(() => {});
+    await page
+      .evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))))
+      .catch(() => {});
     const html = await page.content();
     const finalUrl = page.url();
 
     let cwv: CoreWebVitals | undefined;
     try {
-      const raw = await page.evaluate(() => (window as any).__seoforgeCwv);
+      const raw = await page.evaluate(() => {
+        const cwv = (window as any).__seoforgeCwv;
+        // TTFB per web-vitals: responseStart of the navigation entry (was never set).
+        const nav = performance.getEntriesByType("navigation")[0] as any;
+        if (cwv && nav) cwv.ttfb = Math.max(0, Math.round(nav.responseStart - (nav.activationStart || 0)));
+        return cwv;
+      });
       if (raw) {
         cwv = {
           lcp: raw.lcp || undefined,

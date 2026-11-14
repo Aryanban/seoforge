@@ -54,7 +54,6 @@ import {
   generateFaqSchema,
   generateLocalBusinessSchema,
   generateBreadcrumbSchema,
-  generateRecommendedSchemas,
   formatSchemaScript,
 } from "../schema-generator.js";
 import { findInternalLinkOpportunities } from "../link-opportunities.js";
@@ -62,7 +61,6 @@ import { analyzeAnchorProfile } from "../anchor-analyzer.js";
 import { compareCrawls, formatCrawlDiffMarkdown } from "../analysis/crawl-diff.js";
 import { analyzeLogs } from "../analysis/log-parser.js";
 import { detectCannibalization } from "../analysis/cannibalization.js";
-import { extractCustomFields, CustomExtractorRule } from "../analysis/custom-extractor.js";
 import { scoreContent } from "../analysis/live-content-scorer.js";
 import { generateCodePatch } from "../analysis/code-patcher.js";
 import { evaluateCiGate } from "../analysis/ci-gate.js";
@@ -81,7 +79,6 @@ import {
 import {
   timesfmForecast,
   forecastCrawlTrend,
-  formatTimesfmMarkdown,
 } from "../forecasting/index.js";
 
 interface RunningJob {
@@ -337,13 +334,19 @@ export function createServer(options: ServerOptions = {}): Hono {
     return c.json(repo.getIssueUrls(db, crawlId, name));
   });
 
+  app.get("/api/crawl/:id/stats", (c) => c.json(repo.getCrawlStats(db, c.req.param("id"))));
+
   app.get("/api/crawl/:id/pages", (c) => {
     const crawlId = c.req.param("id");
     return c.json(
-      repo.getPages(db, crawlId, {
+      repo.getPageRows(db, crawlId, {
         search: c.req.query("search"),
         status: c.req.query("status"),
         isOrphan: c.req.query("orphan") === "1",
+        indexable: c.req.query("indexable") === "1" ? true : c.req.query("indexable") === "0" ? false : undefined,
+        depth: c.req.query("depth") ? parseInt(c.req.query("depth")!, 10) : undefined,
+        sort: c.req.query("sort"),
+        dir: c.req.query("dir") === "desc" ? "desc" : "asc",
         minAeo: c.req.query("minAeo") ? parseInt(c.req.query("minAeo")!, 10) : undefined,
         page: c.req.query("page") ? parseInt(c.req.query("page")!, 10) : undefined,
         pageSize: c.req.query("pageSize") ? parseInt(c.req.query("pageSize")!, 10) : undefined,
@@ -499,12 +502,12 @@ export function createServer(options: ServerOptions = {}): Hono {
       if (!body.html && !body.url) {
         return c.json({ error: "Either html or url is required" }, 400);
       }
-      let html = body.html || "";
+      const html = body.html || "";
       if (!html && body.url) {
-        const { page } = await auditSinglePage(body.url);
-        // If audit fetched HTML, analyze it
-        const res = analyzeContent(html || "", { url: body.url, targetKeyword: body.targetKeyword });
-        return c.json({ url: body.url, analysis: res });
+        // Fetch + analyze the live page (previously analyzed an empty string).
+        const { contentAnalysis } = await auditSinglePage(body.url, { targetKeyword: body.targetKeyword });
+        if (!contentAnalysis) return c.json({ error: `Could not fetch HTML from ${body.url}` }, 502);
+        return c.json({ url: body.url, analysis: contentAnalysis });
       }
       const analysis = analyzeContent(html, { url: body.url, targetKeyword: body.targetKeyword });
       return c.json({ analysis });

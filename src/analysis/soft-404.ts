@@ -2,7 +2,7 @@
  * Soft 404 & Dead Page Detection Engine — Google Search Console & Semrush parity.
  * Accurately detects pages that return HTTP 200 OK but are actually missing, dead, or empty pages.
  */
-import { PageAuditResult, AuditIssue } from "../types.js";
+import { AuditIssue } from "../types.js";
 
 export interface Soft404CheckResult {
   isSoft404: boolean;
