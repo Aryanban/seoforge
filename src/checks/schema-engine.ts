@@ -24,7 +24,8 @@ export function validateSchemaOrg(
       typesFound: [],
       missingExpected: expectedEntities,
       googleRichResultsErrors: [],
-      schemaOrgErrors: ["No application/ld+json script tag found in HTML."],
+      // "No JSON-LD" is reported once, as schema_missing; it is not a validation error.
+      schemaOrgErrors: [],
       // NOTE: `errors` is reserved for JSON *parse* failures. Leaving it empty
       // here prevents the "no structured data" case from also being reported
       // as "malformed JSON-LD".
@@ -101,6 +102,10 @@ function isPlainString(value: unknown): boolean {
   return typeof value === "string";
 }
 
+function isAbsent(value: unknown): boolean {
+  return value === undefined || value === null || value === "";
+}
+
 function validateEntity(
   node: any,
   types: string[],
@@ -110,6 +115,19 @@ function validateEntity(
 ): void {
   const has = (t: string) => types.includes(t);
   const label = node.name || node.headline || node["@type"] || "entity";
+  const missing = (type: string, prop: string) =>
+    `${type} '${label}' missing required '${prop}' (Google rich results).`;
+  const requireProps = (type: string, obj: any, props: string[]) => {
+    for (const p of props) if (isAbsent(obj[p])) googleRichResultsErrors.push(missing(type, p));
+  };
+  // AggregateRating applies to a top-level AggregateRating node and to any entity's nested aggregateRating.
+  for (const r of [has("AggregateRating") ? node : undefined, node.aggregateRating]) {
+    if (!r || typeof r !== "object") continue;
+    if (isAbsent(r.ratingValue)) googleRichResultsErrors.push(missing("AggregateRating", "ratingValue"));
+    if (isAbsent(r.ratingCount) && isAbsent(r.reviewCount)) {
+      googleRichResultsErrors.push(missing("AggregateRating", "ratingCount or reviewCount"));
+    }
+  }
 
   if (has("SoftwareApplication") || has("WebApplication")) {
     if (!node.name) googleRichResultsErrors.push(`SoftwareApplication '${label}' missing mandatory 'name'.`);
@@ -162,23 +180,25 @@ function validateEntity(
     }
   }
 
+  // Article / NewsArticle / BlogPosting have no Google-required properties (headline, author, datePublished are recommended).
   if (has("Article") || has("NewsArticle") || has("BlogPosting")) {
-    if (!node.headline) googleRichResultsErrors.push(`Article '${label}' missing mandatory 'headline'.`);
-    if (!node.author) googleRichResultsErrors.push(`Article '${label}' missing mandatory 'author'.`);
-    if (!node.datePublished)
-      googleRichResultsErrors.push(`Article '${label}' missing mandatory 'datePublished'.`);
     if (node.author && isPlainString(node.author)) {
       schemaOrgErrors.push(`Article.author is a raw string '${node.author}' instead of a structured Person object.`);
     }
   }
 
   if (has("Product")) {
-    if (!node.name) googleRichResultsErrors.push(`Product '${label}' missing mandatory 'name'.`);
-    if (!node.offers && !node.aggregateRating) {
-      googleRichResultsErrors.push(`Product '${label}' missing 'offers' or 'aggregateRating' for rich results.`);
+    requireProps("Product", node, ["name"]);
+    if (isAbsent(node.review) && isAbsent(node.aggregateRating) && isAbsent(node.offers)) {
+      googleRichResultsErrors.push(missing("Product", "review, aggregateRating, or offers"));
     }
     if (node.offers && isPlainString(node.offers)) {
       schemaOrgErrors.push("Product.offers is a raw string instead of a structured Offer object.");
+    }
+    for (const offer of [node.offers].flat()) {
+      if (offer && typeof offer === "object" && isAbsent(offer.price) && isAbsent(offer.priceSpecification)) {
+        googleRichResultsErrors.push(missing("Offer", "price"));
+      }
     }
   }
 
@@ -189,24 +209,23 @@ function validateEntity(
       schemaOrgErrors.push(`Offer missing 'priceCurrency' (e.g. 'USD').`);
   }
 
-  if (has("Event")) {
-    if (!node.name) googleRichResultsErrors.push(`Event '${label}' missing mandatory 'name'.`);
-    if (!node.startDate) googleRichResultsErrors.push(`Event '${label}' missing mandatory 'startDate'.`);
-    if (!node.location) googleRichResultsErrors.push(`Event '${label}' missing mandatory 'location'.`);
-  }
+  if (has("Event")) requireProps("Event", node, ["name", "startDate", "location"]);
 
-  if (has("LocalBusiness")) {
-    if (!node.name) googleRichResultsErrors.push("LocalBusiness missing mandatory 'name'.");
-    if (!node.address) googleRichResultsErrors.push("LocalBusiness missing mandatory 'address'.");
-  }
+  const localBusinessType = ["LocalBusiness", "Restaurant", "Store"].find(has);
+  if (localBusinessType) requireProps(localBusinessType, node, ["name", "address"]);
 
   if (has("BreadcrumbList")) {
-    if (!node.itemListElement || !Array.isArray(node.itemListElement)) {
-      googleRichResultsErrors.push("BreadcrumbList missing 'itemListElement' array.");
+    const items = node.itemListElement;
+    if (!Array.isArray(items) || items.length === 0) {
+      googleRichResultsErrors.push(missing("BreadcrumbList", "itemListElement"));
     } else {
-      node.itemListElement.forEach((item: any, idx: number) => {
-        if (!item.position) googleRichResultsErrors.push(`BreadcrumbList item ${idx} missing 'position'.`);
-        if (!item.name) googleRichResultsErrors.push(`BreadcrumbList item ${idx} missing 'name'.`);
+      items.forEach((item: any, idx: number) => {
+        const props = idx < items.length - 1 ? ["position", "name", "item"] : ["position", "name"];
+        for (const p of props) {
+          if (isAbsent(item?.[p])) {
+            googleRichResultsErrors.push(`BreadcrumbList '${label}' item ${idx} missing required '${p}' (Google rich results).`);
+          }
+        }
       });
     }
   }
@@ -221,8 +240,10 @@ function validateEntity(
   }
 
   if (has("Review")) {
-    if (!node.reviewRating) googleRichResultsErrors.push("Review missing 'reviewRating'.");
-    if (!node.author) googleRichResultsErrors.push("Review missing 'author'.");
+    requireProps("Review", node, ["author", "reviewRating"]);
+    if (node.reviewRating && isAbsent(node.reviewRating.ratingValue)) {
+      googleRichResultsErrors.push(missing("Review", "reviewRating.ratingValue"));
+    }
   }
 
   if (has("Rating")) {
@@ -230,10 +251,13 @@ function validateEntity(
     if (node.bestRating === undefined) schemaOrgErrors.push("Rating missing 'bestRating'.");
   }
 
-  if (has("VideoObject")) {
-    if (!node.name) googleRichResultsErrors.push("VideoObject missing mandatory 'name'.");
-    if (!node.thumbnailUrl) googleRichResultsErrors.push("VideoObject missing mandatory 'thumbnailUrl'.");
-    if (!node.uploadDate) googleRichResultsErrors.push("VideoObject missing mandatory 'uploadDate'.");
+  if (has("VideoObject")) requireProps("VideoObject", node, ["name", "thumbnailUrl", "uploadDate"]);
+
+  if (has("Recipe")) requireProps("Recipe", node, ["name", "image"]);
+
+  if (has("JobPosting")) {
+    requireProps("JobPosting", node, ["title", "description", "datePosted", "hiringOrganization"]);
+    if (node.jobLocationType !== "TELECOMMUTE") requireProps("JobPosting", node, ["jobLocation"]);
   }
 
   if (has("Dataset")) {

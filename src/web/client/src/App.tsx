@@ -197,8 +197,8 @@ export default function App() {
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 ${
                   isActive
-                    ? "bg-indigo-500/12 text-white font-medium"
-                    : "text-zinc-400 hover:text-white hover:bg-panel3/70"
+                    ? "bg-indigo-500/12 text-text font-medium"
+                    : "text-zinc-400 hover:text-text hover:bg-panel3/70"
                 }`
               }
             >
@@ -213,6 +213,8 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
+
+        <ThemeToggle />
 
         {crawl && (
           <div className="px-3.5 py-3 border-t border-border">
@@ -402,4 +404,35 @@ function OptRow({ label, children }: { label: string; children: React.ReactNode 
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? "dark");
+  const next = theme === "dark" ? "light" : "dark";
+  const toggle = () => {
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("seoforge-theme", next);
+    } catch {
+      /* storage blocked: theme still applies for this session */
+    }
+    setTheme(next);
+  };
+  return (
+    <button
+      onClick={toggle}
+      aria-label={`Switch to ${next} mode`}
+      title={`Switch to ${next} mode`}
+      className="mx-2 mb-2 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted hover:text-text hover:bg-panel3/70 transition-colors"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-[15px] h-[15px]" aria-hidden>
+        {theme === "dark" ? (
+          <path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5 1.2 3h-2.4L12 2Zm0 20-1.2-3h2.4L12 22ZM2 12l3-1.2v2.4L2 12Zm20 0-3 1.2v-2.4L22 12ZM4.9 4.9l3 1.3-1.7 1.7-1.3-3Zm14.2 14.2-3-1.3 1.7-1.7 1.3 3Zm0-14.2-1.3 3-1.7-1.7 3-1.3ZM4.9 19.1l1.3-3 1.7 1.7-3 1.3Z" />
+        ) : (
+          <path d="M12.3 2a9 9 0 1 0 9.7 11.8A7.5 7.5 0 0 1 12.3 2Z" />
+        )}
+      </svg>
+      {theme === "dark" ? "Light mode" : "Dark mode"}
+    </button>
+  );
 }

@@ -54,9 +54,9 @@ import { compareCrawls, formatCrawlDiffMarkdown } from "../analysis/crawl-diff.j
 import { analyzeLogs } from "../analysis/log-parser.js";
 import { detectCannibalization } from "../analysis/cannibalization.js";
 import { extractCustomFields, CustomExtractorRule } from "../analysis/custom-extractor.js";
-import { analyzeLinkIntersect, formatLinkIntersectMarkdown } from "../analysis/link-intersect.js";
-import { analyzeContentGap, formatContentGapMarkdown } from "../analysis/content-gap.js";
-import { testRobotsPath, auditRobotsAiCompliance, formatRobotsAuditMarkdown } from "../analysis/robots-simulator.js";
+import { analyzeLinkIntersect } from "../analysis/link-intersect.js";
+import { analyzeContentGap } from "../analysis/content-gap.js";
+import { testRobotsPath, auditRobotsAiCompliance } from "../analysis/robots-simulator.js";
 import { analyzeRedirectChain, generateDirectRedirectCode } from "../analysis/redirect-tracer.js";
 import { analyzePageSpeedLab } from "../analysis/pagespeed-lab.js";
 import { scoreContent } from "../analysis/live-content-scorer.js";
@@ -1046,15 +1046,15 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_analyze_content") {
         const url = args?.url as string | undefined;
-        let html = (args?.html as string) || "";
+        const html = (args?.html as string) || "";
+        const targetKeyword = args?.target_keyword as string | undefined;
         if (!html && url) {
-          const { page } = await auditSinglePage(url);
-          // If fetched, analyze HTML
+          // Fetch + analyze the live page (previously analyzed an empty string).
+          const { contentAnalysis } = await auditSinglePage(url, { targetKeyword });
+          if (!contentAnalysis) return err(`Could not fetch HTML from ${url}`);
+          return ok({ url, analysis: contentAnalysis });
         }
-        const analysis = analyzeContent(html, {
-          url,
-          targetKeyword: args?.target_keyword as string | undefined,
-        });
+        const analysis = analyzeContent(html, { url, targetKeyword });
         return ok({ url, analysis });
       }
 

@@ -13,7 +13,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import robotsParser from "robots-parser";
+import { parseRobots } from "../crawl/robots.js";
 import { fetchPage } from "../crawl/fetcher.js";
 import { failureDetail } from "./diagnostics.js";
 import { parseSearch } from "./parse.js";
@@ -123,7 +123,7 @@ class DiscoveryRobotsCache {
       sha256: createHash("sha256").update(r.body).digest("hex"),
       redirects: originOf(r.finalUrl) === origin ? [] : [r.finalUrl],
     };
-    return { blocked, parser: text ? (robotsParser as any)(robotsUrl, text) : null };
+    return { blocked, parser: text ? parseRobots(robotsUrl, text) : null };
   }
 }
 

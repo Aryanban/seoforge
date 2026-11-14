@@ -213,7 +213,7 @@ export const RECOMMENDATIONS: Record<string, string> = {
   h1_too_long: "Shorten the H1 to ≤ 12 words focused on the page's primary keyword.",
   h2_missing: "Add semantic <h2> subheadings to break content into scannable sections.",
   heading_hierarchy_skip: "Fix the heading order so levels progress logically (H1 → H2 → H3).",
-  low_word_count: "Expand visible body text to at least 250–350 words of rich, relevant content.",
+  low_word_count: "Check the page fully covers its topic; add depth where the query needs it, without padding.",
   generic_anchor_text: 'Replace generic anchors ("click here") with descriptive keyword-rich link text.',
   empty_anchor_text: "Add descriptive anchor text to every link (also fixes accessibility).",
   internal_nofollow: 'Remove rel="nofollow" from internal links so link equity flows within the site.',

@@ -15,7 +15,7 @@ import {
 } from "../types.js";
 import { ExtractedLinks } from "../crawl/link-extractor.js";
 import { RobotsCheckResult } from "../crawl/robots.js";
-import { countWords, extractVisibleText } from "../crawl/link-extractor.js";
+import { countWords, extractMainText } from "../crawl/link-extractor.js";
 import { validateSchemaOrg } from "./schema-engine.js";
 import { evaluateAeo } from "./aeo-engine.js";
 import { metaChecks } from "./meta.js";
@@ -32,6 +32,9 @@ import { aeoChecks } from "./aeo.js";
 import { documentChecks } from "./document.js";
 import { urlChecks } from "./url.js";
 import { accessibilityChecks } from "./accessibility.js";
+import { languageChecks } from "./language.js";
+import { headIntegrityChecks } from "./head-integrity.js";
+import { jsRenderingIssues } from "./js-rendering.js";
 
 export type { Thresholds } from "../types.js";
 import type { Thresholds } from "../types.js";
@@ -107,6 +110,10 @@ export interface PageCheckContext {
   /** First-hop HTTP status that produced the redirect (301/302/307/308). */
   redirectStatusCode?: number;
   isHttpToHttpsRedirect: boolean;
+  /** Raw server HTML when `html` is the rendered DOM (render mode), for JS diffing. */
+  rawHtml?: string;
+  /** axe-core violations from render mode. */
+  axe?: import("../crawl/renderer.js").AxeViolation[];
 }
 
 export interface CheckOutput {
@@ -241,7 +248,7 @@ export function extractPageMeta(
     h1Text,
     h2Count: $("h2").length,
     h1InNoscriptOnly,
-    wordCount: countWords(extractVisibleText($)),
+    wordCount: countWords(extractMainText($)),
     hreflang,
     openGraph: {
       title: ogTitle,
@@ -285,14 +292,23 @@ registerCheck("url", urlChecks);
 registerCheck("accessibility", accessibilityChecks);
 registerCheck("schema", schemaChecks);
 registerCheck("aeo", aeoChecks);
+registerCheck("language", languageChecks);
+registerCheck("head-integrity", headIntegrityChecks);
+registerCheck("js-rendering", (ctx) => ({
+  issues: ctx.rendered && ctx.rawHtml && ctx.$ && ctx.status === 200 ? jsRenderingIssues(ctx.rawHtml, ctx.$, ctx.pageUrl) : [],
+}));
 
 export interface PageCheckResult {
   page: import("../types.js").PageAuditResult;
   issues: AuditIssue[];
 }
 
+/** Checks that apply to any response; everything else needs a 2xx document (Screaming Frog audits content on 200s only). */
+const STATUS_ONLY_CHECKS = new Set(["status-indexability", "url"]);
+
 export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckResult {
-  const hasHtml = ctx.html && ctx.html.length > 0;
+  const isDocument = ctx.status >= 200 && ctx.status < 300;
+  const hasHtml = isDocument && ctx.html && ctx.html.length > 0;
   const meta = hasHtml
     ? extractPageMeta(
         ctx.$ ?? ctx.html,
@@ -309,6 +325,7 @@ export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckRes
 
   const issues: AuditIssue[] = [];
   for (const check of REGISTERED_CHECKS) {
+    if (!isDocument && !STATUS_ONLY_CHECKS.has(check.name)) continue;
     try {
       const out = check.run(fullCtx);
       issues.push(...out.issues);

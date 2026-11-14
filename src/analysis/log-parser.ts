@@ -14,6 +14,7 @@
  * when a crawl page list is supplied.
  */
 import { AI_BOTS } from "./ai-crawlers.js";
+import { lookup as dnsLookup, reverse as dnsReverse } from "node:dns/promises";
 
 export interface LogEntry {
   ip: string;
@@ -187,6 +188,73 @@ export function analyzeLogs(rawText: string, options: LogAnalysisOptions = {}): 
     windowEnd: entries.length ? new Date(entries[entries.length - 1].timeMs).toISOString() : undefined,
     botHits: botHitsArr, urlStats, statusByBot: statusArr, waste, neverCrawledIndexable: neverCrawledIndexable.slice(0, 200), recommendations,
   };
+}
+
+export interface DnsResolver {
+  reverse(ip: string): Promise<string[]>;      // PTR hostnames
+  lookup(host: string): Promise<string[]>;     // A/AAAA addresses
+}
+
+/** Hostname suffixes Google and Bing document for their crawler reverse DNS. */
+export const VERIFIED_BOT_DOMAINS: Record<string, string[]> = {
+  Googlebot: ["googlebot.com", "google.com", "googleusercontent.com"],
+  Bingbot: ["search.msn.com"],
+};
+
+const defaultResolver: DnsResolver = {
+  reverse: (ip) => dnsReverse(ip),
+  lookup: async (host) => (await dnsLookup(host, { all: true })).map((a) => a.address),
+};
+
+/** Reverse DNS -> hostname in bot domain -> forward DNS must include the IP. Any DNS error means unverified. */
+export async function verifyBotIp(ip: string, bot: string, resolver: DnsResolver = defaultResolver): Promise<boolean> {
+  const domains = Object.hasOwn(VERIFIED_BOT_DOMAINS, bot) ? VERIFIED_BOT_DOMAINS[bot] : undefined;
+  if (!domains) return false;
+  try {
+    for (const host of await resolver.reverse(ip)) {
+      const h = host.toLowerCase();
+      if (!domains.some((d) => h === d || h.endsWith("." + d))) continue;
+      if ((await resolver.lookup(host)).includes(ip)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Verifies each distinct (bot, ip) pair once. Counts hits, not IPs. */
+export async function verifyCrawlerHits(
+  entries: LogEntry[],
+  opts: { resolver?: DnsResolver; concurrency?: number } = {},
+): Promise<{ bot: string; verified: number; spoofed: number; unverifiedIps: string[] }[]> {
+  const resolver = opts.resolver ?? defaultResolver;
+  const concurrency = Math.max(1, opts.concurrency ?? 8);
+
+  const claimed: Array<{ bot: string; ip: string }> = [];
+  for (const e of entries) {
+    const bot = classifyBot(e.userAgent);
+    if (Object.hasOwn(VERIFIED_BOT_DOMAINS, bot)) claimed.push({ bot, ip: e.ip });
+  }
+
+  const distinct = Array.from(new Map(claimed.map((c) => [`${c.bot}|${c.ip}`, c])).values());
+  const verdict = new Map<string, boolean>();
+  let next = 0;
+  const worker = async () => {
+    while (next < distinct.length) {
+      const { bot, ip } = distinct[next++];
+      verdict.set(`${bot}|${ip}`, await verifyBotIp(ip, bot, resolver));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, distinct.length) }, worker));
+
+  const out = new Map<string, { bot: string; verified: number; spoofed: number; unverifiedIps: Set<string> }>();
+  for (const c of claimed) {
+    const r = out.get(c.bot) ?? { bot: c.bot, verified: 0, spoofed: 0, unverifiedIps: new Set<string>() };
+    if (verdict.get(`${c.bot}|${c.ip}`)) r.verified++;
+    else { r.spoofed++; r.unverifiedIps.add(c.ip); }
+    out.set(c.bot, r);
+  }
+  return Array.from(out.values()).map((r) => ({ bot: r.bot, verified: r.verified, spoofed: r.spoofed, unverifiedIps: Array.from(r.unverifiedIps).slice(0, 50) }));
 }
 
 export { AI_BOTS as _logAiBots };

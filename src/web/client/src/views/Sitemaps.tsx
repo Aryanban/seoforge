@@ -44,7 +44,7 @@ export default function Sitemaps({ crawlId }: { crawlId: string }) {
         {stats.map((s) => (
           <Card key={s.label} className="p-4">
             <div
-              className={`text-2xl font-bold tabular-nums ${s.ok ? "text-white" : "text-amber-400"}`}
+              className={`text-2xl font-bold tabular-nums ${s.ok ? "text-text" : "text-amber-400"}`}
             >
               {s.value}
             </div>

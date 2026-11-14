@@ -239,10 +239,10 @@ export const FIX_LIBRARY: Record<string, FixLibraryEntry> = {
   low_word_count: {
     effort: "L",
     impact:
-      "Thin pages rarely rank because they lack the topical depth and keyword coverage that satisfy search intent. Google's helpful-content system penalizes shallow text.",
+      "Google sets no minimum word count, but pages too short to answer the query fully rarely satisfy search intent.",
     steps: [
       "Identify the user intent behind the target keyword.",
-      "Expand to 250–350+ words of original, useful content.",
+      "Add the original, useful detail the intent needs; do not pad to hit a word count.",
       "Add examples, comparisons, and a table where relevant.",
     ],
   },

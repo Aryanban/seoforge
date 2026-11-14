@@ -245,7 +245,7 @@ export function getIssues(db: DatabaseSync, crawlId: string, filter: IssueFilter
   const offset = (page - 1) * pageSize;
 
   const totalRow = db
-    .prepare(`SELECT COUNT(*) AS c FROM issues i WHERE ${where.join(" AND ")}`)
+    .prepare(`SELECT COUNT(DISTINCT i.name) AS c FROM issues i WHERE ${where.join(" AND ")}`)
     .get(...params) as Row;
   const total = totalRow?.c ?? 0;
 
@@ -288,11 +288,32 @@ export interface PageFilter {
   status?: string;
   minAeo?: number;
   isOrphan?: boolean;
+  /** Exact crawl depth (10 means 10+). */
+  depth?: number;
+  /** Only indexable (true) or non-indexable (false) pages. */
+  indexable?: boolean;
   page?: number;
   pageSize?: number;
+  /** Column to sort by (whitelisted) and direction. Default: depth, url. */
+  sort?: string;
+  dir?: "asc" | "desc";
 }
 
-export function getPages(db: DatabaseSync, crawlId: string, filter: PageFilter = {}): { rows: PageAuditResult[]; total: number } {
+const PAGE_SORT_COLUMNS: Record<string, string> = {
+  url: "url",
+  status: "status",
+  depth: "depth",
+  responseTimeMs: "response_time_ms",
+  ttfbMs: "ttfb_ms",
+  wordCount: "word_count",
+  incomingLinks: "incoming_links",
+  outgoingLinks: "outgoing_links",
+  aeoScore: "aeo_score",
+  internalLinkScore: "internal_link_score",
+  title: "title",
+};
+
+function queryPageRows(db: DatabaseSync, crawlId: string, filter: PageFilter): { rows: Row[]; total: number } {
   const where: string[] = ["crawl_id = ?"];
   const params: any[] = [crawlId];
   if (filter.search) {
@@ -301,9 +322,24 @@ export function getPages(db: DatabaseSync, crawlId: string, filter: PageFilter =
   }
   if (filter.status && filter.status !== "all") {
     if (filter.status === "ok") where.push("status = 200");
-    else if (filter.status === "redirect") where.push("status >= 300 AND status < 400");
+    else if (filter.status === "redirect" || filter.status === "3xx") where.push("status >= 300 AND status < 400");
     else if (filter.status === "broken") where.push("status >= 400");
-    else where.push("status = ?");
+    else if (filter.status === "2xx") where.push("status >= 200 AND status < 300");
+    else if (filter.status === "4xx") where.push("status >= 400 AND status < 500");
+    else if (filter.status === "5xx") where.push("status >= 500");
+    else if (filter.status === "failed") where.push("(status IS NULL OR status < 100)");
+    else {
+      where.push("status = ?");
+      params.push(Number(filter.status) || 0);
+    }
+  }
+  if (filter.depth !== undefined) {
+    where.push(filter.depth >= 10 ? "depth >= ?" : "depth = ?");
+    params.push(filter.depth);
+  }
+  if (filter.indexable !== undefined) {
+    where.push("is_indexable = ?");
+    params.push(filter.indexable ? 1 : 0);
   }
   if (filter.minAeo !== undefined) {
     where.push("aeo_score < ?");
@@ -324,10 +360,70 @@ export function getPages(db: DatabaseSync, crawlId: string, filter: PageFilter =
   const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM pages WHERE ${where.join(" AND ")}`).get(...params) as Row;
   const total = totalRow?.c ?? 0;
 
+  const sortCol = filter.sort ? PAGE_SORT_COLUMNS[filter.sort] : undefined;
+  const order = sortCol ? `${sortCol} ${filter.dir === "desc" ? "DESC" : "ASC"}, url` : "depth, url";
   const rows = db
-    .prepare(`SELECT * FROM pages WHERE ${where.join(" AND ")} ORDER BY depth, url LIMIT ? OFFSET ?`)
+    .prepare(`SELECT * FROM pages WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ? OFFSET ?`)
     .all(...params, pageSize, offset) as Row[];
+  return { rows, total };
+}
 
+/** Flat rows for the dashboard table, with each page's issues attached. */
+export function getPageRows(db: DatabaseSync, crawlId: string, filter: PageFilter = {}) {
+  // Bounded: one bound parameter per URL in the issues lookup below.
+  const { rows, total } = queryPageRows(db, crawlId, { ...filter, pageSize: Math.min(500, filter.pageSize ?? 50) });
+  const issuesByUrl = new Map<string, any[]>();
+  if (rows.length > 0) {
+    const urls = rows.map((r) => r.url);
+    const found = db
+      .prepare(
+        `SELECT page_url, issue_id, name, severity, category, message FROM issues
+         WHERE crawl_id = ? AND page_url IN (${urls.map(() => "?").join(",")})`
+      )
+      .all(crawlId, ...urls) as Row[];
+    for (const i of found) {
+      const list = issuesByUrl.get(i.page_url) ?? [];
+      list.push({ id: i.issue_id, name: i.name, severity: i.severity, category: i.category, message: i.message });
+      issuesByUrl.set(i.page_url, list);
+    }
+  }
+  return {
+    total,
+    rows: rows.map((r) => {
+      const auditIssues = issuesByUrl.get(r.url) ?? [];
+      return {
+        url: r.url,
+        normalizedUrl: r.normalized_url,
+        finalUrl: r.final_url ?? r.url,
+        status: r.status ?? 0,
+        depth: r.depth ?? 0,
+        ttfbMs: r.ttfb_ms ?? undefined,
+        responseTimeMs: r.response_time_ms ?? 0,
+        title: r.title ?? undefined,
+        description: r.description ?? undefined,
+        h1Text: r.h1_text ?? undefined,
+        wordCount: r.word_count ?? 0,
+        h1Count: r.h1_count ?? 0,
+        h2Count: r.h2_count ?? 0,
+        incomingLinks: r.incoming_links ?? 0,
+        outgoingLinks: r.outgoing_links ?? 0,
+        externalLinks: r.external_links ?? 0,
+        isOrphan: !!r.is_orphan,
+        internalLinkScore: r.internal_link_score ?? 0,
+        isIndexable: !!r.is_indexable,
+        canonical: r.canonical ?? undefined,
+        canonicalMatches: !!r.canonical_matches,
+        aeoScore: r.aeo_score ?? 0,
+        schemaTypes: safeParse(r.schema_types, []) as string[],
+        issues: auditIssues.map((i) => i.name),
+        auditIssues,
+      };
+    }),
+  };
+}
+
+export function getPages(db: DatabaseSync, crawlId: string, filter: PageFilter = {}): { rows: PageAuditResult[]; total: number } {
+  const { rows, total } = queryPageRows(db, crawlId, filter);
   const pages: PageAuditResult[] = rows.map((r) => ({
     url: r.url,
     normalizedUrl: r.normalized_url,
@@ -838,4 +934,72 @@ export function listDiscoveryRuns(
     searchAvailable: !!r.search_available,
     createdAt: r.created_at,
   }));
+}
+
+
+/**
+ * Overview distributions in one round-trip. Health Score follows Ahrefs'
+ * definition: the share of crawled pages with no Error-level issue.
+ */
+export function getCrawlStats(db: DatabaseSync, crawlId: string) {
+  const one = (sql: string) => (db.prepare(sql).get(crawlId) as Row | undefined) ?? {};
+  const all = (sql: string) => db.prepare(sql).all(crawlId) as Row[];
+
+  const total = Number(one("SELECT COUNT(*) AS c FROM pages WHERE crawl_id = ?").c ?? 0);
+  const withErrors = Number(
+    one(`SELECT COUNT(DISTINCT p.url) AS c FROM pages p JOIN issues i
+         ON i.crawl_id = p.crawl_id AND i.page_url = p.url
+         WHERE p.crawl_id = ? AND i.severity = 'Error'`).c ?? 0
+  );
+  const status = one(`SELECT
+      SUM(status >= 200 AND status < 300) AS s2xx,
+      SUM(status >= 300 AND status < 400) AS s3xx,
+      SUM(status >= 400 AND status < 500) AS s4xx,
+      SUM(status >= 500) AS s5xx,
+      SUM(status IS NULL OR status < 100) AS failed,
+      SUM(is_indexable = 1) AS indexable,
+      SUM(is_orphan = 1) AS orphans
+    FROM pages WHERE crawl_id = ?`);
+  const timing = one(`SELECT
+      SUM(response_time_ms < 200) AS b0,
+      SUM(response_time_ms >= 200 AND response_time_ms < 500) AS b1,
+      SUM(response_time_ms >= 500 AND response_time_ms < 1000) AS b2,
+      SUM(response_time_ms >= 1000 AND response_time_ms < 2000) AS b3,
+      SUM(response_time_ms >= 2000) AS b4,
+      AVG(response_time_ms) AS avg
+    FROM pages WHERE crawl_id = ? AND status > 0`);
+  const depth = all(
+    `SELECT MIN(depth, 10) AS depth, COUNT(*) AS count FROM pages WHERE crawl_id = ? GROUP BY MIN(depth, 10) ORDER BY 1`
+  );
+  const categories = all(`SELECT category,
+      COUNT(DISTINCT CASE WHEN severity = 'Error' THEN page_url END) AS errors,
+      COUNT(DISTINCT CASE WHEN severity = 'Warning' THEN page_url END) AS warnings,
+      COUNT(DISTINCT CASE WHEN severity = 'Notice' THEN page_url END) AS notices
+    FROM issues WHERE crawl_id = ? GROUP BY category ORDER BY errors DESC, warnings DESC, notices DESC`);
+  const n = (v: any) => Number(v ?? 0);
+
+  return {
+    total,
+    health: { score: total ? Math.round(((total - withErrors) / total) * 100) : 0, pagesWithErrors: withErrors },
+    status: [
+      { key: "2xx", label: "2xx Success", count: n(status.s2xx) },
+      { key: "3xx", label: "3xx Redirect", count: n(status.s3xx) },
+      { key: "4xx", label: "4xx Client error", count: n(status.s4xx) },
+      { key: "5xx", label: "5xx Server error", count: n(status.s5xx) },
+      { key: "failed", label: "Failed / blocked", count: n(status.failed) },
+    ],
+    indexability: { indexable: n(status.indexable), nonIndexable: total - n(status.indexable), orphans: n(status.orphans) },
+    responseTime: {
+      avgMs: Math.round(n(timing.avg)),
+      buckets: [
+        { label: "< 200 ms", count: n(timing.b0) },
+        { label: "200–500 ms", count: n(timing.b1) },
+        { label: "0.5–1 s", count: n(timing.b2) },
+        { label: "1–2 s", count: n(timing.b3) },
+        { label: "> 2 s", count: n(timing.b4) },
+      ],
+    },
+    depth: depth.map((d) => ({ depth: n(d.depth), count: n(d.count) })),
+    categories: categories.map((c) => ({ category: c.category, errors: n(c.errors), warnings: n(c.warnings), notices: n(c.notices) })),
+  };
 }

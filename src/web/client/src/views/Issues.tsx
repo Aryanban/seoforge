@@ -1,28 +1,39 @@
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, PagedResult, IssueRow, severityBg } from "../lib/api.js";
 import { Card, Badge, Input, Select, Spinner, EmptyState, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 
 export default function Issues({ crawlId }: { crawlId: string }) {
+  const [params] = useSearchParams();
   const [data, setData] = useState<PagedResult<IssueRow> | null>(null);
-  const [severity, setSeverity] = useState("all");
-  const [search, setSearch] = useState("");
+  const [severity, setSeverity] = useState(params.get("severity") ?? "all");
+  const [category, setCategory] = useState(params.get("category") ?? "all");
+  const [search, setSearch] = useState(params.get("q") ?? "");
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    api<{ categories: { category: string }[] }>(`/api/crawl/${crawlId}/stats`)
+      .then((s) => setCategories(s.categories.map((c) => c.category)))
+      .catch(() => setCategories([]));
+  }, [crawlId]);
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const pageSize = 25;
 
   useEffect(() => {
     setPage(1);
-  }, [severity, search]);
+  }, [severity, category, search]);
 
   useEffect(() => {
     const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
     if (severity !== "all") q.set("severity", severity);
+    if (category !== "all") q.set("category", category);
     if (search) q.set("search", search);
     api<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?${q.toString()}`)
       .then(setData)
       .catch(() => setData(null));
-  }, [crawlId, severity, search, page]);
+  }, [crawlId, severity, category, search, page]);
 
   if (!data) return <Spinner label="Loading issues…" />;
 
@@ -38,6 +49,14 @@ export default function Issues({ crawlId }: { crawlId: string }) {
               <option value="Error">Errors</option>
               <option value="Warning">Warnings</option>
               <option value="Notice">Notices</option>
+            </Select>
+            <Select value={category} onChange={setCategory}>
+              <option value="all">All categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </Select>
             <Input
               value={search}

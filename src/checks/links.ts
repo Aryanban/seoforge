@@ -21,7 +21,12 @@ const GENERIC_ANCHORS = [
   "view more",
   "continue reading",
 ];
-const MAX_LINKS_PER_PAGE = 100;
+/**
+ * Screaming Frog's default "High Internal Outlinks" threshold (followed internal
+ * outlinks). Google dropped its old "fewer than 100 links" guideline long ago;
+ * Semrush flags at 3,000 total links.
+ */
+const MAX_INTERNAL_OUTLINKS = 1000;
 
 export function linkChecks(ctx: PageCheckContext): CheckOutput {
   const issues: AuditIssue[] = [];
@@ -76,15 +81,16 @@ export function linkChecks(ctx: PageCheckContext): CheckOutput {
   }
 
   // Link dilution
-  if (totalLinks > MAX_LINKS_PER_PAGE) {
+  const followedInternal = links.links.filter((l) => l.isInternal && !l.nofollow).length;
+  if (followedInternal >= MAX_INTERNAL_OUTLINKS) {
     issues.push({
       id: "too_many_links",
       name: "Page has too many links",
       severity: "Warning",
       category: "Links",
-      message: `Page contains ${totalLinks} links. Google recommends fewer than ${MAX_LINKS_PER_PAGE} links per page to preserve crawl efficiency and link equity.`,
+      message: `Page has ${followedInternal} followed internal outlinks (${totalLinks} links in total). Above ${MAX_INTERNAL_OUTLINKS}, each link passes very little equity and the page is hard to use; consider trimming navigation or paginating.`,
       url: pageUrl,
-      details: { count: totalLinks },
+      details: { count: totalLinks, followedInternal },
     });
   }
 

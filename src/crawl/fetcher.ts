@@ -56,6 +56,9 @@ const crawlerDispatcher = new Agent({
   keepAliveMaxTimeout: 120000,
   connections: 128,
   pipelining: 1,
+  // Negotiate HTTP/2 via ALPN where the server offers it (Googlebot does too);
+  // falls back to HTTP/1.1 keep-alive otherwise.
+  allowH2: true,
   connect: { lookup: cachedLookup },
 });
 
@@ -75,6 +78,8 @@ export interface FetchResult {
   contentType?: string;
   contentLengthBytes?: number;
   errorMessage?: string;
+  /** Undecoded body, when FetchOptions.bytes is set. */
+  bytes?: Buffer;
 }
 
 export interface FetchOptions {
@@ -83,6 +88,10 @@ export interface FetchOptions {
   method?: "GET" | "HEAD";
   followRedirects?: boolean;
   maxRedirects?: number;
+  /** GET for the status only: cancel the body stream instead of downloading it. */
+  discardBody?: boolean;
+  /** Keep the raw body bytes (gzip files) and raise the size cap to this many bytes. */
+  bytes?: number;
 }
 
 export async function fetchPage(url: string, options: FetchOptions = {}): Promise<FetchResult> {
@@ -120,7 +129,6 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
         },
       } as any);
       const hopTtfb = Date.now() - hopStart;
@@ -137,11 +145,22 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
         });
 
         let html = "";
+        let bytes: Buffer | undefined;
         const cType = (res.headers.get("content-type") || "").toLowerCase();
         const isHtmlOrXml = /text\/html|application\/xhtml\+xml|application\/xml|text\/xml/i.test(cType);
         const cLength = parseInt(res.headers.get("content-length") || "0", 10);
 
-        if (method === "GET" && status < 400) {
+        if (options.discardBody) {
+          await res.body?.cancel().catch(() => {});
+        } else if (options.bytes && method === "GET" && status < 400) {
+          if (cLength > options.bytes) {
+            await res.body?.cancel().catch(() => {});
+          } else {
+            bytes = Buffer.from(await res.arrayBuffer());
+            if (bytes.length > options.bytes) bytes = undefined;
+            else html = bytes.toString("utf8");
+          }
+        } else if (method === "GET" && status < 400) {
           if (!isHtmlOrXml && /image\/|video\/|audio\/|application\/pdf|application\/zip|font\//.test(cType)) {
             html = "";
           } else if (cLength > 10 * 1024 * 1024) {
@@ -177,6 +196,7 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           redirectStatusCode: firstRedirectCode,
           contentType: headers["content-type"],
           contentLengthBytes: headers["content-length"] ? parseInt(headers["content-length"], 10) : html.length,
+          bytes,
         };
       }
 
