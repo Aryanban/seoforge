@@ -5,7 +5,8 @@ import { AuditIssue } from "../types.js";
 import { PageCheckContext, CheckOutput } from "./registry.js";
 import { analyzeContent } from "../content-analyzer.js";
 
-const THIN_CONTENT_WORDS = 250;
+// Screaming Frog's default "Low Content Pages" threshold. Google sets no minimum word count.
+const THIN_CONTENT_WORDS = 200;
 
 export function contentChecks(ctx: PageCheckContext): CheckOutput {
   const issues: AuditIssue[] = [];
@@ -22,7 +23,7 @@ export function contentChecks(ctx: PageCheckContext): CheckOutput {
       name: "Low word count",
       severity,
       category: "Content",
-      message: `Page body text has only ${meta.wordCount} words (minimum threshold is ${minWords} words for search indexing).`,
+      message: `Main content has ${meta.wordCount} words, below the ${minWords}-word low-content threshold. Google has no minimum word count; check that the page fully answers the query it targets.`,
       url: pageUrl,
       details: { wordCount: meta.wordCount, threshold: minWords },
     });

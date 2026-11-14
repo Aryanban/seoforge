@@ -83,20 +83,20 @@ Done, all measured with `scripts/bench-crawl.ts` (0 ms latency unless noted):
 
 ## Phase 3 — accuracy and parity with Screaming Frog / Ahrefs / Sitebulb
 
-| Area | Gap | Change | Builds on |
-| --- | --- | --- | --- |
-| JavaScript SEO | Raw HTML is fetched in render mode but never compared | Raw-vs-rendered diff: title, meta robots, canonical, H1, links, word count changed by JS | Screaming Frog "JavaScript" tab (behaviour) |
-| Main-content extraction | Thin content and duplicates count nav/footer text | Use Readability to isolate main content for word count, duplicates and n-grams | `@mozilla/readability` (Apache-2.0) |
-| Core Web Vitals | Lab-only, custom observer | Optional Lighthouse per page in render mode; site-wide scan with a worker pool | Lighthouse (Apache-2.0), Unlighthouse (MIT) |
-| Accessibility | ~12 hand-written rules | Run axe-core inside the rendered page when `--render` is on | axe-core (MPL-2.0, as dependency) |
-| HTML validity | none | Parse-error and invalid-head checks (elements that close `<head>` early break meta tags) | html-validate (MIT) |
-| Structured data | Generic schema.org checks | Encode Google rich-result required/recommended properties per type as data; validate against them | Google Search Central docs; schema.org vocabulary |
-| Language | `lang` attribute only | Detect content language and flag `lang` / hreflang mismatches | franc (MIT) |
-| robots.txt | robots-parser | Add RFC 9309 conformance tests from Google's robotstxt test suite | google/robotstxt (Apache-2.0) tests |
-| Sitemaps | Whole-document parse | Streaming parse for 50k-URL / gzip sitemaps, lastmod validation | `sitemap` npm (MIT) stream parser |
-| Log files | Parser exists | Verify Googlebot/Bingbot by reverse + forward DNS before counting hits | Google's documented verification method |
-| Keyword volume | GSC + Trends estimate | Keep, but show confidence band in every UI/MCP surface; never present as exact | — |
-| Backlinks | Local link-intersect only | Optional import of the Common Crawl host-level web graph (open data, no key) | Common Crawl web graphs |
+| Area | Status | Result |
+| --- | --- | --- |
+| JavaScript SEO | Done (Phase 1). Raw-vs-rendered diff of noindex, canonical, title, description, H1, links and word count. | `tests/js-rendering.test.ts` |
+| Main-content text | Done, without Readability: it needs jsdom, too slow per page. Word count and duplicate hashes use `<main>`/`[role=main]` when present, else `<body>` minus header/nav/footer/aside and their ARIA roles (Screaming Frog's default content area also drops nav and footer). Also fixed a word-count bug: adjacent blocks were joined ("<h1>Title</h1><p>Body</p>" counted as 1 word). | Throughput unchanged: 652–670 pages/s at 2k pages (Phase 2: 677). Shared chrome no longer makes different pages near-duplicates. `tests/main-text.test.ts` |
+| Accessibility | Done. axe-core (optional dependency, MPL-2.0) runs in every rendered page, WCAG 2.0–2.2 A/AA tags; its results replace the static rules for that page. Issue ids `axe_<rule>`; critical → Error, serious → Warning. `axe: false` turns it off. | Real Chromium test finds image-alt, button-name, html-has-lang. `tests/axe.test.ts` |
+| HTML validity | Done (Phase 1). Invalid elements that end `<head>` early. | — |
+| Structured data | Done (Phase 1). Google rich-result required properties per type. | — |
+| Language | Done (Phase 1). franc-min content language vs `lang`. | — |
+| robots.txt | Done. 20 cases from Google's reference parser tests; plain robots-parser failed 4 of them (plus the sitemap-line and 500 KiB tests: 6 of 27). Added Google's lenient parsing (missing colon, `disalow`/`useragent`/`user agent` and other accepted typos) and the 500 KiB limit. Status handling per RFC 9309 §2.3.1: 5xx, 429 or unreachable now means disallow all (was: crawl everything), reported as `robots_txt_unreachable`. | `tests/robots-conformance.test.ts` (27 tests) |
+| Sitemaps | Done. Gzipped sitemaps served as `application/x-gzip` returned 0 URLs (bytes were decoded as UTF-8 before gunzip); now read as raw bytes. Size cap raised from 10 MB to the protocol's 50 MB (gzip-bomb safe). New errors: over 50,000 URLs, non-W3C or future `<lastmod>`. Sitemap errors are now crawl issues (`sitemap_error`); they were collected and dropped. Streaming parse not needed. | 50k-URL gzipped sitemap: 0 → 50,000 URLs, parsed in 199 ms, +193 MB RSS. `tests/sitemap-parser.test.ts` |
+| Log files | Done. `log-audit --verify-bots` runs reverse + forward DNS verification and reports spoofed Googlebot/Bingbot hits. Opt-in: it sends log IPs to the system DNS resolver. | Real Googlebot IP 66.249.66.1 verified; spoofed IP flagged. |
+| Keyword volume | Already met. The only surface (CLI `volume`) prints the low–high band, method and confidence. | — |
+| Core Web Vitals (Lighthouse) | Not done. Adds a large dependency for numbers render mode already measures (LCP, CLS, FCP, TTFB). Revisit if users need Lighthouse scores specifically. | — |
+| Backlinks (Common Crawl) | Not done. The host-level graph is tens of GB; it needs a separate import tool and storage design. | — |
 
 ## Phase 4 — product surface
 

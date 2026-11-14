@@ -47,7 +47,7 @@ import {
 } from "./reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "./competitors/index.js";
 import { compareCrawls, formatCrawlDiffMarkdown } from "./analysis/crawl-diff.js";
-import { analyzeLogs } from "./analysis/log-parser.js";
+import { analyzeLogs, parseLogLine, verifyCrawlerHits, LogEntry } from "./analysis/log-parser.js";
 import { detectCannibalization } from "./analysis/cannibalization.js";
 import { estimateVolumes, createTrendsFetcher, autocomplete, type GscAnchor } from "./keyword-volume.js";
 import { scoreContent } from "./analysis/live-content-scorer.js";
@@ -1062,6 +1062,7 @@ program
   .description("Analyze server access logs (CLF/Combined) and cross-reference with crawl data")
   .option("--crawl <id>", "Crawl ID to cross-reference known/indexable URLs")
   .option("--out <path>", "Write analysis summary JSON to path")
+  .option("--verify-bots", "Verify Googlebot/Bingbot hits by reverse + forward DNS (Google's documented method); flags spoofed user agents")
   .action(async (logFile, options) => {
     const content = await fs.readFile(logFile, "utf-8");
     let knownPages: Array<{ url: string; status: number; isIndexable: boolean }> | undefined;
@@ -1084,8 +1085,19 @@ program
     if (report.neverCrawledIndexable && report.neverCrawledIndexable.length > 0) {
       console.log(yellow(`\n⚠ ${report.neverCrawledIndexable.length} indexable page(s) never visited by bots in log window`));
     }
+    let verification: Awaited<ReturnType<typeof verifyCrawlerHits>> | undefined;
+    if (options.verifyBots) {
+      const entries = content.split(/\r?\n/).map(parseLogLine).filter((e): e is LogEntry => e !== null);
+      verification = await verifyCrawlerHits(entries);
+      console.log(`\n• Search bot verification (reverse + forward DNS):`);
+      if (verification.length === 0) console.log(gray("  - No Googlebot or Bingbot hits in this log"));
+      for (const v of verification) {
+        const line = `  - ${bold(v.bot)}: ${v.verified} verified, ${v.spoofed} unverified hits`;
+        console.log(v.spoofed ? yellow(`${line} (e.g. ${v.unverifiedIps.slice(0, 3).join(", ")})`) : line);
+      }
+    }
     if (options.out) {
-      await fs.writeFile(options.out, JSON.stringify(report, null, 2), "utf-8");
+      await fs.writeFile(options.out, JSON.stringify(verification ? { ...report, botVerification: verification } : report, null, 2), "utf-8");
       console.log(green(`\n✔ Log audit report → ${options.out}`));
     }
   });

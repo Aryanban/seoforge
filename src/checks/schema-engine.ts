@@ -24,7 +24,8 @@ export function validateSchemaOrg(
       typesFound: [],
       missingExpected: expectedEntities,
       googleRichResultsErrors: [],
-      schemaOrgErrors: ["No application/ld+json script tag found in HTML."],
+      // "No JSON-LD" is reported once, as schema_missing; it is not a validation error.
+      schemaOrgErrors: [],
       // NOTE: `errors` is reserved for JSON *parse* failures. Leaving it empty
       // here prevents the "no structured data" case from also being reported
       // as "malformed JSON-LD".

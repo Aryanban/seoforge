@@ -5,13 +5,28 @@
  * render mode pay zero download/runtime cost. If the package is missing we
  * surface an actionable message rather than crashing the crawl.
  */
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { CoreWebVitals } from "../types.js";
+
+/** One failed axe-core rule on a rendered page. */
+export interface AxeViolation {
+  id: string;
+  impact: "minor" | "moderate" | "serious" | "critical" | null;
+  help: string;
+  helpUrl: string;
+  nodes: number;
+  /** CSS selectors of the first few failing elements. */
+  targets: string[];
+}
 
 export interface RenderResult {
   html: string;
   finalUrl: string;
   status: number;
   cwv?: CoreWebVitals;
+  /** axe-core WCAG 2.x A/AA violations, when options.axe is set and axe-core is installed. */
+  axe?: AxeViolation[];
   errorMessage?: string;
 }
 
@@ -19,7 +34,24 @@ export interface RenderOptions {
   timeoutMs?: number;
   waitUntil?: "load" | "domcontentloaded" | "networkidle";
   blockHeavyResources?: boolean;
+  /** Run axe-core in the rendered page. */
+  axe?: boolean;
 }
+
+let axeSource: string | null | undefined;
+/** axe-core's browser bundle, or null when the optional dependency is missing. */
+function loadAxeSource(): string | null {
+  if (axeSource === undefined) {
+    try {
+      axeSource = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+    } catch {
+      axeSource = null;
+    }
+  }
+  return axeSource;
+}
+
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 const CWV_INIT_SCRIPT = `
 (() => {
@@ -182,11 +214,33 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
       /* non-fatal */
     }
 
+    let axe: AxeViolation[] | undefined;
+    const source = options.axe ? loadAxeSource() : null;
+    if (source) {
+      try {
+        await page.addScriptTag({ content: source });
+        axe = await page.evaluate(async (tags: string[]) => {
+          const res = await (window as any).axe.run(document, { runOnly: { type: "tag", values: tags }, resultTypes: ["violations"] });
+          return res.violations.map((v: any) => ({
+            id: v.id,
+            impact: v.impact ?? null,
+            help: v.help,
+            helpUrl: v.helpUrl,
+            nodes: v.nodes.length,
+            targets: v.nodes.slice(0, 5).map((n: any) => String(n.target?.[0] ?? "")),
+          }));
+        }, AXE_TAGS);
+      } catch {
+        /* axe failure (CSP, navigation) leaves the hand-written checks in place */
+      }
+    }
+
     return {
       html,
       finalUrl,
       status: response?.status() ?? 200,
       cwv,
+      axe,
     };
   } catch (err: any) {
     return {

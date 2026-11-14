@@ -59,7 +59,8 @@ export class Crawler extends EventEmitter {
   private llmsFullTxtAccessible?: boolean;
   private maxDepthReached = 0;
   private llmsTxtIssues: AuditIssue[] = [];
-  private aiPostureIssues: AuditIssue[] = [];
+  /** Site-level issues (robots.txt, sitemap, AI posture), attached to the root page. */
+  private siteIssues: AuditIssue[] = [];
   private hreflangPairsByUrl = new Map<string, Array<{ lang: string; href: string }>>();
   private requestedCount = 0;
   /**
@@ -187,12 +188,15 @@ export class Crawler extends EventEmitter {
         : sitemapResult.entries;
       this.sitemapUrlCount = sitemapResult.urlCount;
       this.sitemapUrlSet = new Set(this.sitemapEntries.map((e) => normalizeUrl(e.url)));
+      for (const message of sitemapResult.errors.slice(0, 20)) {
+        this.siteIssues.push({ id: "sitemap_error", name: "Sitemap problem", severity: "Warning", category: "Sitemap", message, url: sitemapUrl });
+      }
     }
     // 3b. AI-crawler robots posture audit (visibility-loss warnings)
     try {
       const posture = auditAiBotPosture(this.robots?.raw || "");
       for (const token of posture.blockedSearchBots) {
-        this.aiPostureIssues.push({
+        this.siteIssues.push({
           id: "ai_search_bot_blocked",
           name: `AI search crawler blocked: ${token}`,
           severity: "Warning",
@@ -203,7 +207,7 @@ export class Crawler extends EventEmitter {
         });
       }
       for (const token of posture.blockedFetchers) {
-        this.aiPostureIssues.push({
+        this.siteIssues.push({
           id: "ai_fetcher_blocked",
           name: `AI assistant fetcher blocked: ${token}`,
           severity: "Notice",
@@ -216,6 +220,17 @@ export class Crawler extends EventEmitter {
     } catch {
       /* posture audit is non-fatal */
     }
+    if (this.robots.unreachable) {
+      this.siteIssues.push({
+        id: "robots_txt_unreachable",
+        name: "robots.txt unreachable",
+        severity: "Error",
+        category: "Robots",
+        message: `robots.txt returned ${this.robots.status ? `HTTP ${this.robots.status}` : "no response"}. Google treats a 5xx, 429 or unreachable robots.txt as "disallow everything" and stops crawling the site (RFC 9309 §2.3.1.4).`,
+        url: `${origin}/robots.txt`,
+        details: { status: this.robots.status },
+      });
+    }
 
     // 4. Seed the queue per strategy
     const queue = new CrawlQueue(opts.maxDepth, opts.limit);
@@ -224,6 +239,20 @@ export class Crawler extends EventEmitter {
 
     // 5. Crawl with a worker pool
     await this.runWorkers(queue, opts, targetUrl);
+    // 5b. Sitemap URLs that link discovery never reached: crawl them (within the
+    // budget) so they appear as orphans, like Screaming Frog's "crawl linked XML sitemaps".
+    const linkDiscovery = opts.strategy !== "sitemap" && !(Array.isArray(opts.seedUrls) && opts.seedUrls.length > 0);
+    if (linkDiscovery && !this.stopped && this.sitemapEntries.length > 0) {
+      const extra = this.sitemapEntries.filter(
+        (e) => this.originOf(e.url) === origin && !queue.has(normalizeUrl(e.url)) && !matchesPatterns(e.url, opts.excludePatterns)
+      );
+      let added = 0;
+      for (const e of extra) if (queue.enqueue(e.url, normalizeUrl(e.url), 0, "sitemap")) added++;
+      if (added > 0) {
+        this.emitProgress({ status: "running", crawled: this.pages.length, discovered: queue.discovered, depth: 0, message: `Crawling ${added} sitemap URL(s) not found through links` });
+        await this.runWorkers(queue, opts, targetUrl);
+      }
+    }
     if (opts.checkpointPath) {
       // Stopped crawls stay resumable; finished ones need no checkpoint.
       if (this.stopped) this.writeCheckpoint(opts.checkpointPath, targetUrl, queue);
@@ -528,14 +557,20 @@ export class Crawler extends EventEmitter {
 
         queue.markVisited(item.normalizedUrl);
 
+        // A redirected URL is recorded with its redirect code and not audited as
+        // the destination's document; the destination gets its own row.
+        const redirectCode: number | undefined = (pageData as any).redirectStatusCode;
+        const redirected = pageData.isRedirect && redirectCode !== undefined;
+
         // Parse + checks: on a worker thread when the pool is up, else inline.
         const { page, issues, links, images, dup } = await this.runPageTask({
           url: item.url,
           depth: item.depth,
           sourceUrl: item.source,
           finalUrl: pageData.finalUrl,
-          html: pageData.html,
-          status: pageData.status,
+          html: redirected ? "" : pageData.html,
+          status: redirected ? redirectCode : pageData.status,
+          redirectStatusCode: redirectCode,
           responseTimeMs: pageData.responseTimeMs,
           ttfbMs: pageData.ttfbMs,
           rendered: pageData.rendered,
@@ -545,9 +580,17 @@ export class Crawler extends EventEmitter {
           isRedirect: pageData.isRedirect,
           redirectChain: pageData.redirectChain,
           isHttpToHttpsRedirect: pageData.isHttpToHttpsRedirect,
-          rawHtml: (pageData as any).rawHtml,
+          rawHtml: redirected ? undefined : (pageData as any).rawHtml,
+          axe: redirected ? undefined : (pageData as any).axe,
           options: this.taskOptions,
         });
+        if (redirected && pageData.finalUrl) {
+          // Same-site destinations only (plus the start URL, e.g. http → https or a www hop).
+          const dest = pageData.finalUrl;
+          if ((item.depth === 0 || this.originOf(dest) === this.originOf(item.url)) && !matchesPatterns(dest, opts.excludePatterns)) {
+            queue.enqueue(dest, normalizeUrl(dest), item.depth + 1, item.url);
+          }
+        }
         if (links.hreflang.length > 0) this.hreflangPairsByUrl.set(item.url, links.hreflang);
         if (dup) this.dupFeatures.set(page.url, dup);
       this.rawExtractedLinks.push(links);
@@ -588,7 +631,7 @@ export class Crawler extends EventEmitter {
       // Raw fetch (headers, TTFB, redirect chain, raw HTML) runs alongside the
       // render instead of after it — one round-trip of wall time, not two.
       const [rendered, raw] = await Promise.all([
-        renderUrl(url, { timeoutMs: opts.timeoutMs, blockHeavyResources: false }),
+        renderUrl(url, { timeoutMs: opts.timeoutMs, blockHeavyResources: false, axe: opts.axe !== false }),
         fetchPage(url, { timeoutMs: opts.timeoutMs, method: "GET" }),
       ]);
       if (rendered.html) {
@@ -600,6 +643,7 @@ export class Crawler extends EventEmitter {
           ttfbMs: raw.ttfbMs,
           depth,
           isRedirect: raw.redirected,
+          redirectStatusCode: raw.redirectStatusCode,
           redirectChain: raw.redirectChain,
           isHttpToHttpsRedirect: raw.requestedUrl.startsWith("http://") && (raw.finalUrl.startsWith("https://")),
           html: rendered.html,
@@ -609,6 +653,7 @@ export class Crawler extends EventEmitter {
           contentType: raw.contentType,
           contentLengthBytes: raw.contentLengthBytes,
           cwv: rendered.cwv,
+          axe: rendered.axe,
           errorMessage: raw.errorMessage,
         };
       }
@@ -621,6 +666,7 @@ export class Crawler extends EventEmitter {
         ttfbMs: raw.ttfbMs,
         depth,
         isRedirect: raw.redirected,
+        redirectStatusCode: raw.redirectStatusCode,
         redirectChain: raw.redirectChain,
         isHttpToHttpsRedirect: raw.requestedUrl.startsWith("http://") && raw.finalUrl.startsWith("https://"),
         html: raw.html,
@@ -684,6 +730,7 @@ export class Crawler extends EventEmitter {
       ttfbMs: raw.ttfbMs,
       depth,
       isRedirect: raw.redirected,
+      redirectStatusCode: raw.redirectStatusCode,
       redirectChain: raw.redirectChain,
       isHttpToHttpsRedirect: raw.requestedUrl.startsWith("http://") && raw.finalUrl.startsWith("https://"),
       html,
@@ -1058,7 +1105,8 @@ export class Crawler extends EventEmitter {
 
       if (p.incomingInternalLinks.length === 0 && !isRootish && p.status === 200 && !p.blockedByRobots) {
         p.isOrphan = true;
-        issues.push({
+        // Sitemap orphans get the specific orphan_in_sitemap issue below instead.
+        if (!this.sitemapUrlSet.has(p.normalizedUrl)) issues.push({
           id: "orphan_page",
           name: "Orphan page (has no incoming internal links)",
           severity: "Error",
@@ -1131,7 +1179,7 @@ export class Crawler extends EventEmitter {
     // so they flow through the normal summary/recommendation pipeline.
     const root = this.pages.find((p) => p.normalizedUrl === this.rootUrl) || this.pages[0];
     if (root) {
-      for (const issue of [...this.llmsTxtIssues, ...this.aiPostureIssues]) {
+      for (const issue of [...this.llmsTxtIssues, ...this.siteIssues]) {
         root.auditIssues.push(issue);
         root.issues.push(`[${issue.severity}] ${issue.name}`);
         this.emit("issue", issue);

@@ -5,7 +5,7 @@
  */
 import * as cheerio from "cheerio";
 import { AuditIssue, CoreWebVitals, ImageInfo, PageAuditResult } from "../types.js";
-import { extractLinks, extractImages, extractVisibleText, ExtractedLinks } from "./link-extractor.js";
+import { extractLinks, extractImages, extractMainText, ExtractedLinks } from "./link-extractor.js";
 import { runPageChecks } from "../checks/registry.js";
 import { extractCustomFields } from "../analysis/custom-extractor.js";
 import { duplicateFeatures, DuplicateFeatures } from "../analysis/duplicates.js";
@@ -26,8 +26,10 @@ export interface PageTask {
   isRedirect: boolean;
   redirectChain: string[];
   isHttpToHttpsRedirect: boolean;
+  redirectStatusCode?: number;
   /** Raw server HTML when html is the rendered DOM. */
   rawHtml?: string;
+  axe?: import("./renderer.js").AxeViolation[];
   /** Resolved crawl options minus large seed lists (cloned per task). */
   options: any;
 }
@@ -49,7 +51,7 @@ export function processPage(t: PageTask): PageTaskResult {
     ? extractLinks($, t.finalUrl)
     : { links: [], internalTargets: [], externalTargets: [], hreflang: [] };
   const images = $ ? extractImages($, t.finalUrl) : [];
-  const bodyText = $ ? extractVisibleText($) : "";
+  const bodyText = $ ? extractMainText($) : "";
   const opts = t.options;
 
   const { page, issues } = runPageChecks({
@@ -78,7 +80,9 @@ export function processPage(t: PageTask): PageTaskResult {
     isRedirect: t.isRedirect,
     redirectChain: t.redirectChain,
     isHttpToHttpsRedirect: t.isHttpToHttpsRedirect,
+    redirectStatusCode: t.redirectStatusCode,
     rawHtml: t.rawHtml,
+    axe: t.axe,
   });
   if (opts.customExtractors?.length && t.html) {
     page.customExtractions = extractCustomFields(t.html, opts.customExtractors);

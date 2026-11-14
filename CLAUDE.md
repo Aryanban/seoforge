@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-**SEOForge** is a high-throughput, Screaming Frog + Ahrefs–grade technical crawler, search intelligence engine, and 38-tool native Model Context Protocol (MCP) server with Agent Reach anti-bot bypass and TimesFM zero-shot forecasting. 100% local, zero third-party API keys, zero cloud subscriptions, and zero data leakage.
+**SEOForge** is a high-throughput, Screaming Frog + Ahrefs–grade technical crawler, search intelligence engine, and native Model Context Protocol (MCP) server with Agent Reach anti-bot bypass and TimesFM zero-shot forecasting. 100% local, zero third-party API keys, zero cloud subscriptions, and zero data leakage.
 
 - **Runtime**: Node.js $\ge$ 22 (uses native `node:sqlite`)
 - **Language**: TypeScript 5.8 (Strict Mode)
 - **Engine**: Asynchronous BFS raw HTTP pipelining + optional headless Playwright rendering + Agent Reach anti-bot engine + TimesFM time-series forecasting
-- **Test Framework**: Vitest (32 test files, 244 passing tests)
+- **Test Framework**: Vitest (`tests/`)
 - **Web Dashboard**: Hono + React 19 + Tailwind CSS + Vite (SSE live updates)
-- **MCP Server**: Stdio JSON-RPC 2.0 with 38 native tools
+- **MCP Server**: Stdio JSON-RPC 2.0 (tools registered in `src/mcp/mcp-server.ts`)
 
 ---
 
@@ -17,7 +17,7 @@
 
 ```bash
 # Development & Testing
-npm test                # Run all 236 tests via Vitest
+npm test                # Run all tests via Vitest
 npm run build           # Full build: tsc (dist/) + vite build (dist/web/)
 npm run typecheck       # Strict TypeScript type check
 npm run lint            # ESLint static analysis
@@ -25,7 +25,7 @@ npm run lint            # ESLint static analysis
 # CLI Operations
 npx tsx src/cli.ts crawl <url> [options]    # Run local BFS crawl (--render, --reach)
 npx tsx src/cli.ts forecast <url>           # TimesFM zero-shot forecasting (--metric, --horizon)
-npx tsx src/cli.ts audit <url>              # Full audit with 60+ check types
+npx tsx src/cli.ts audit                    # Audit the domains in seoforge.config.json (use `crawl <url>` for one site)
 npx tsx src/cli.ts inspect <url>            # Live single-page deep inspect (--reach)
 npx tsx src/cli.ts reach <url>              # Scrape & read any URL via Agent Reach
 npx tsx src/cli.ts reach:doctor             # Check Agent Reach channels & dependencies
@@ -53,7 +53,7 @@ src/
 │   ├── redirect-tracer.ts   # Redirect chain tracer & loop detection
 │   └── pagespeed-lab.ts     # Local lab Core Web Vitals profiling
 ├── ai/                      # Deterministic code patches & AEO snippet generators
-├── mcp/mcp-server.ts        # 37-tool Model Context Protocol server
+├── mcp/mcp-server.ts        # Model Context Protocol server
 ├── store/                   # Embedded SQLite persistence (node:sqlite)
 └── web/                     # React dashboard client
 ```

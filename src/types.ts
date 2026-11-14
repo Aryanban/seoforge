@@ -96,6 +96,8 @@ export interface CrawlOptions {
    * Deleted once the crawl completes.
    */
   checkpointPath?: string;
+  /** Run axe-core accessibility rules in render mode (default true when render is on). */
+  axe?: boolean;
   /**
    * Production origin for staging/local audits (e.g. "https://example.com" while crawling http://localhost:3000).
    * Sitemap/seed URLs on this origin are rewritten to the crawl origin, and canonical/hreflang/og URLs on it
