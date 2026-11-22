@@ -30,6 +30,8 @@ export function extractLinks(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl
   } catch {
     base = new URL("https://example.com");
   }
+  // Internal = same origin as the page itself, even when <base href> points elsewhere (e.g. a CDN).
+  const pageOrigin = base.origin;
 
   // Honor <base href>
   const baseHref = $("base").attr("href");
@@ -54,10 +56,18 @@ export function extractLinks(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl
       return;
     }
 
-    const anchorText = $(el).text().trim().replace(/\s+/g, " ");
-    const rel = $(el).attr("rel")?.toLowerCase() || "";
-    const nofollow = rel.includes("nofollow") || rel.includes("sponsored") || rel.includes("ugc");
-    const isInternal = resolved.origin === base.origin;
+    // Text, else the accessible name: aria-label, then image alt (Google uses alt as anchor text).
+    const $el = $(el);
+    const anchorText = (
+      $el.text().trim() ||
+      $el.attr("aria-label")?.trim() ||
+      $el.find("img[alt]").first().attr("alt")?.trim() ||
+      ""
+    ).replace(/\s+/g, " ");
+    const rel = $el.attr("rel")?.toLowerCase() || "";
+    const relTokens = rel.split(/\s+/);
+    const nofollow = relTokens.includes("nofollow") || relTokens.includes("sponsored") || relTokens.includes("ugc");
+    const isInternal = resolved.origin === pageOrigin;
 
     links.push({
       source: pageUrl,

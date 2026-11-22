@@ -85,7 +85,7 @@ export function processPage(t: PageTask): PageTaskResult {
     axe: t.axe,
   });
   if (opts.customExtractors?.length && t.html) {
-    page.customExtractions = extractCustomFields(t.html, opts.customExtractors);
+    page.customExtractions = extractCustomFields(t.html, opts.customExtractors, $ ?? undefined);
   }
   const dup = t.status === 200 && bodyText ? duplicateFeatures(bodyText) : null;
   return { page, issues, links, images, dup };

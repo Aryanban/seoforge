@@ -70,4 +70,9 @@ describe("Custom Extractor (Screaming Frog parity)", () => {
     expect(xpathToCss("//span[@class='price']")).toBe("span.price");
     expect(xpathToCss("//meta[@name='author']")).toBe("meta[name='author']");
   });
+
+  it("terminates on regexes that can match the empty string", () => {
+    const rules: CustomExtractorRule[] = [{ id: "digits", name: "digits", type: "regex", selector: "\\d*" }];
+    expect(extractCustomFields("a1b22c", rules).digits).toEqual(["1", "22"]);
+  });
 });

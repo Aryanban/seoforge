@@ -137,15 +137,15 @@ export class Crawler extends EventEmitter {
     });
 
     // 1. Initial probes in parallel: robots.txt + llms.txt endpoints
-    const [robotsRes, llmsProbe, llmsFullProbe, llmsRes] = await Promise.all([
+    // llms.txt is fetched once with GET; its status doubles as the accessibility probe.
+    const [robotsRes, llmsFullProbe, llmsRes] = await Promise.all([
       fetchRobots(`${origin}/robots.txt`),
-      this.probe(`${origin}/llms.txt`),
       this.probe(`${origin}/llms-full.txt`),
       fetchPage(`${origin}/llms.txt`, { timeoutMs: 8000, method: "GET" }).catch(() => null),
     ]);
     this.robots = robotsRes;
     this.robotsAccessible = this.robots.accessible;
-    this.llmsTxtAccessible = llmsProbe;
+    this.llmsTxtAccessible = llmsRes?.status === 200;
     this.llmsFullTxtAccessible = llmsFullProbe;
 
     if (llmsRes && llmsRes.status === 200) {
@@ -843,11 +843,16 @@ export class Crawler extends EventEmitter {
 
   private async verifyLinkTargets(opts: any, _origin: string): Promise<void> {
     // Aggregate every discovered link target
-    const targetMap = new Map<string, { sources: string[]; anchors: string[]; nofollow: boolean; isInternal: boolean }>();
+    // Key internal targets like the crawl queue does (so crawled status is reused), but
+    // key and fetch external targets by their real URL: paths are case-sensitive and the
+    // query is part of the resource (maps.app.goo.gl/AbC…, play.google.com/…?id=…).
+    // Probing the lowercased, query-stripped form reported thousands of false 404s.
+    const targetMap = new Map<string, { url: string; sources: string[]; anchors: string[]; nofollow: boolean; isInternal: boolean }>();
     for (const ex of this.rawExtractedLinks) {
       for (const l of ex.links) {
-        const norm = normalizeUrl(l.target);
+        const norm = l.isInternal ? normalizeUrl(l.target) : l.target.split("#")[0];
         const existing = targetMap.get(norm) || {
+          url: l.target.split("#")[0],
           sources: [],
           anchors: [],
           nofollow: l.nofollow,
@@ -880,7 +885,7 @@ export class Crawler extends EventEmitter {
     const checkOne = async (current: string) => {
       const info = targetMap.get(current)!;
       let host = "";
-      try { host = new URL(current).host; } catch {}
+      try { host = new URL(info.url).host; } catch {}
 
       if (host && failedHosts.has(host)) {
         crawledStatus.set(current, 0);
@@ -888,7 +893,7 @@ export class Crawler extends EventEmitter {
           this.allLinks.push({
             crawlId: this.crawlId,
             source: info.sources[i],
-            target: current,
+            target: info.url,
             anchorText: info.anchors[i] || "",
             nofollow: info.nofollow,
             isInternal: info.isInternal,
@@ -904,12 +909,12 @@ export class Crawler extends EventEmitter {
       const timeoutMs = info.isInternal ? opts.timeoutMs : opts.externalLinkTimeoutMs;
       // Internal checks hit the crawled site: same rate cap / crawl-delay as the crawl.
       if (info.isInternal) await this.throttle(opts);
-      let res = await fetchPage(current, { timeoutMs, method: "HEAD", followRedirects: true });
+      let res = await fetchPage(info.url, { timeoutMs, method: "HEAD", followRedirects: true });
       // Many servers reject or mishandle HEAD (403/405/501, or reset the
       // connection). Re-check with a body-less GET before calling it broken,
       // as linkinator does. Timeouts are not retried: GET would time out too.
       if (res.status >= 400 || (res.status === 0 && !/timed out/i.test(res.errorMessage ?? ""))) {
-        const viaGet = await fetchPage(current, { timeoutMs, method: "GET", followRedirects: true, discardBody: true });
+        const viaGet = await fetchPage(info.url, { timeoutMs, method: "GET", followRedirects: true, discardBody: true });
         if (viaGet.status !== 0) res = viaGet;
       }
       if (info.isInternal && res.status === 429) this.onRateLimited(Number(res.headers["retry-after"]) || 0);
@@ -922,7 +927,7 @@ export class Crawler extends EventEmitter {
         this.allLinks.push({
           crawlId: this.crawlId,
           source: info.sources[i],
-          target: current,
+          target: info.url,
           anchorText: info.anchors[i] || "",
           nofollow: info.nofollow,
           isInternal: info.isInternal,
@@ -932,7 +937,7 @@ export class Crawler extends EventEmitter {
           // dead link. Only a real HTTP >=400 response counts as broken;
           // otherwise big hosts get mass false positives under load.
           // 429 means "slow down", not "gone".
-          isBroken: res.status >= 400 && res.status !== 429,
+          isBroken: isBrokenStatus(res.status),
           isRedirect: res.redirected || (res.status >= 300 && res.status < 400),
           redirectChain: res.redirectChain,
         });
@@ -959,20 +964,22 @@ export class Crawler extends EventEmitter {
       runPool(externalLanes(externalTargets, EXTERNAL_PER_HOST), Math.min(48, Math.max(24, (opts.concurrency || 12) * 2))),
     ]);
 
-    // Record links to already-crawled pages
+    // Record links to already-crawled pages (verified targets were recorded in checkOne).
+    const verified = new Set(toVerify);
     for (const [norm, info] of targetMap.entries()) {
-      if (!crawledStatus.has(norm)) continue;
+      if (verified.has(norm) || !crawledStatus.has(norm)) continue;
       const status = crawledStatus.get(norm)!;
       for (let i = 0; i < info.sources.length; i++) {
         this.allLinks.push({
           crawlId: this.crawlId,
           source: info.sources[i],
-          target: norm,
+          target: info.url,
           anchorText: info.anchors[i] || "",
           nofollow: info.nofollow,
           isInternal: info.isInternal,
           targetStatus: status,
-          isBroken: status >= 400,
+          // Same rule as verified links: 429 means "slow down", not "gone".
+          isBroken: isBrokenStatus(status),
           isRedirect: status >= 300 && status < 400,
           redirectChain: [],
         });
@@ -1043,17 +1050,18 @@ export class Crawler extends EventEmitter {
       for (const [k, v] of next.entries()) score.set(k, v);
     }
 
-    const maxScore = Math.max(...Array.from(score.values()), 1e-9);
+    // A loop, not Math.max(...spread): spreading >~120k values overflows the call stack.
+    let maxScore = 1e-9;
+    for (const v of score.values()) if (v > maxScore) maxScore = v;
     for (const p of this.pages) {
       p.internalLinkScore = Math.round(((score.get(p.normalizedUrl) || 0) / maxScore) * 100);
     }
 
     // Pass 3: broken / redirecting links (attributed to the source page)
-    const pageByNormForLinks = new Map<string, PageAuditResult>();
-    for (const p of this.pages) pageByNormForLinks.set(p.normalizedUrl, p);
     const brokenSeen = new Set<string>();
     for (const link of this.allLinks) {
-      const src = pageByNormForLinks.get(normalizeUrl(link.source));
+      if (!link.isBroken && !(link.isRedirect && link.isInternal)) continue;
+      const src = pageByNorm.get(normalizeUrl(link.source));
       if (!src) continue;
       const key = `${link.source}|${link.target}`;
       if (brokenSeen.has(key)) continue;
@@ -1245,29 +1253,12 @@ export class Crawler extends EventEmitter {
 
     // 3. hreflang reciprocity audit across the crawled set
     try {
-      const hreflangPages = new Map<string, Array<{ lang: string; href: string }>>();
-      const pageInfo = new Map<string, { status: number; isIndexable: boolean }>();
-      for (const p of this.pages) {
-        pageInfo.set(p.url, { status: p.status, isIndexable: p.isIndexable });
-        if (p.hreflang && p.hreflang.length > 0 && p.status === 200) {
-          // Reconstruct hrefs: PageAuditResult stores langs; recover hrefs from
-          // the raw HTML is expensive — instead match by resolving lang→URL via
-          // the page's own outgoing alternates is unavailable post-hoc, so we
-          // record hreflang presence here and audit reciprocity from stored links.
-          hreflangPages.set(p.url, []);
-        }
-      }
-      // Recover full hreflang link pairs from LinkRecords is not available;
-      // audit what we can: pages declaring hreflang without x-default/self-ref
-      // was already covered per-page. Here we flag clusters where exactly one
-      // side declares (unreciprocated cluster) using outgoing internal links
-      // as the discovery signal would over-reach — so this pass only runs when
-      // href data was captured during the crawl (see hreflangLinks below).
-      void hreflangPages;
+      // hreflang href pairs are captured per page during the crawl.
       const pairs = this.hreflangLinkPairs();
       if (pairs.pages.size > 0) {
+        const pageByUrl = new Map(this.pages.map((p) => [p.url, p]));
         for (const issue of auditHreflangSitewide({ pages: pairs.pages, pageInfo: pairs.pageInfo })) {
-          const pg = this.pages.find((p) => p.url === issue.url);
+          const pg = pageByUrl.get(issue.url);
           if (!pg) continue;
           const auditIssue: AuditIssue = {
             id: issue.id,
@@ -1288,12 +1279,7 @@ export class Crawler extends EventEmitter {
     }
   }
 
-  /**
-   * hreflang pairs captured during the crawl. The per-page check context does
-   * not retain hrefs, so the crawler re-derives them here from stored HTML is
-   * intentionally skipped (memory); instead this returns an empty map unless
-   * a subclass/test injects pairs. Kept as a seam for the render pipeline.
-   */
+  /** hreflang (lang, href) pairs captured per page during the crawl. */
   protected hreflangLinkPairs(): {
     pages: Map<string, Array<{ lang: string; href: string }>>;
     pageInfo: Map<string, { status: number; isIndexable: boolean }>;
@@ -1402,6 +1388,14 @@ export function crawlIdId(crawlId?: string): string {
 /** Only the loader flags (--require/--import X) — never --eval/--input-type etc. */
 const CHECKPOINT_INTERVAL_MS = 30_000;
 const CHECKPOINT_VERSION = 1;
+
+/**
+ * A confirmed dead link. 429 means "slow down", and 999 is LinkedIn's (and a few
+ * others') non-standard bot-block response: neither says the page is gone.
+ */
+export function isBrokenStatus(status: number): boolean {
+  return status >= 400 && status !== 429 && status !== 999;
+}
 
 /** At most this many requests in flight to any one external host. */
 const EXTERNAL_PER_HOST = 2;

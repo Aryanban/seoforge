@@ -174,13 +174,21 @@ export function isSameOrigin(a: string, b: string): boolean {
   }
 }
 
+/** Compiled exclude patterns; null marks an invalid regex (substring match instead). */
+const patternCache = new Map<string, RegExp | null>();
+
 export function matchesPatterns(url: string, patterns: string[]): boolean {
   if (!patterns || patterns.length === 0) return false;
   return patterns.some((pattern) => {
-    try {
-      return new RegExp(pattern).test(url);
-    } catch {
-      return url.toLowerCase().includes(pattern.toLowerCase());
+    let re = patternCache.get(pattern);
+    if (re === undefined) {
+      try {
+        re = new RegExp(pattern);
+      } catch {
+        re = null;
+      }
+      patternCache.set(pattern, re);
     }
+    return re ? re.test(url) : url.toLowerCase().includes(pattern.toLowerCase());
   });
 }

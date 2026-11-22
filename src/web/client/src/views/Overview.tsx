@@ -46,7 +46,7 @@ export default function Overview({ crawlId, crawl }: { crawlId: string; crawl: C
       />
 
       {/* Scores + KPIs */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr_2fr] gap-4 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-[1fr_1fr_2fr] gap-4 mb-4">
         <Card className="p-5 flex items-center gap-5">
           <ScoreDial score={health} />
           <div>
@@ -70,7 +70,7 @@ export default function Overview({ crawlId, crawl }: { crawlId: string; crawl: C
             </div>
           </div>
         </Card>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 2xl:grid-cols-2 gap-3 md:col-span-2 2xl:col-span-1">
           {kpis.map((k) => (
             <button
               key={k.label}
@@ -85,7 +85,7 @@ export default function Overview({ crawlId, crawl }: { crawlId: string; crawl: C
       </div>
 
       {/* Distributions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
         <Card className="p-5">
           <ChartTitle title="HTTP status codes" hint="Click a row to list those pages" />
           <BarList
@@ -250,8 +250,8 @@ export default function Overview({ crawlId, crawl }: { crawlId: string; crawl: C
 function ChartTitle({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3 mb-3">
-      <h2 className="text-sm font-semibold">{title}</h2>
-      {hint && <span className="text-[11px] text-faint">{hint}</span>}
+      <h2 className="text-sm font-semibold whitespace-nowrap">{title}</h2>
+      {hint && <span className="text-[11px] text-faint text-right min-w-0">{hint}</span>}
     </div>
   );
 }

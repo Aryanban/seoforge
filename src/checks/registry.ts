@@ -172,7 +172,16 @@ export function extractPageMeta(
 
   const canonical = $('link[rel="canonical"]').attr("href")?.trim();
   const normRequested = normalizeForCompare(finalUrl || pageUrl);
-  const normCanonical = canonical ? normalizeForCompare(canonical) : undefined;
+  // Google resolves a relative canonical against the page URL; compare the resolved form.
+  let resolvedCanonical = canonical;
+  if (canonical) {
+    try {
+      resolvedCanonical = new URL(canonical, finalUrl || pageUrl).href;
+    } catch {
+      /* keep as written */
+    }
+  }
+  const normCanonical = resolvedCanonical ? normalizeForCompare(resolvedCanonical) : undefined;
   let canonicalMatches = false;
   let isSpaCanonicalValid = false;
 
@@ -181,7 +190,7 @@ export function extractPageMeta(
     if (!canonicalMatches && canonicalPolicy === "spa") {
       try {
         const pu = new URL(finalUrl || pageUrl);
-        const pc = new URL(canonical);
+        const pc = new URL(resolvedCanonical!);
         if (pu.origin === pc.origin && pc.pathname === "/") {
           canonicalMatches = true;
           isSpaCanonicalValid = true;
@@ -224,10 +233,14 @@ export function extractPageMeta(
   const twitterDesc = $('meta[name="twitter:description"]').attr("content")?.trim();
   const twitterImage = $('meta[name="twitter:image"]').attr("content")?.trim();
 
-  const robotsMeta = $('meta[name="robots"]').attr("content")?.toLowerCase() || "";
-  const robotsNoindex = robotsMeta.includes("noindex");
-  const xRobots = (headers["x-robots-tag"] || "").toLowerCase();
-  const xRobotsNoindex = xRobots.includes("noindex");
+  // Google combines every robots/googlebot meta tag; the name attribute is case-insensitive.
+  const robotsMeta = $("meta[name]")
+    .filter((_, el) => /^(robots|googlebot)$/i.test($(el).attr("name") || ""))
+    .map((_, el) => $(el).attr("content") || "")
+    .get()
+    .join(",");
+  const robotsNoindex = hasNoindex(robotsMeta);
+  const xRobotsNoindex = xRobotsHasNoindex(headers["x-robots-tag"] || "");
 
   const schema = validateSchemaOrg($, expectedEntities);
   const aeo = evaluateAeo($, html);
@@ -272,6 +285,37 @@ export function extractPageMeta(
     schema,
     aeo,
   };
+}
+
+/** `noindex` or `none` (= noindex, nofollow) in a directive list. */
+export function hasNoindex(directives: string): boolean {
+  return directives
+    .toLowerCase()
+    .split(/[,\s]+/)
+    .some((d) => d === "noindex" || d === "none");
+}
+
+/** Directives whose own syntax contains a colon (not a user-agent scope). */
+const VALUED_DIRECTIVES = new Set(["max-snippet", "max-image-preview", "max-video-preview", "unavailable_after"]);
+
+/**
+ * X-Robots-Tag noindex as it applies to Google. A `<agent>:` prefix scopes the
+ * directives after it to that crawler, so "bingbot: noindex" leaves the page
+ * indexable in Google, while unscoped or "googlebot:" noindex does not.
+ * https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag#xrobotstag
+ */
+export function xRobotsHasNoindex(header: string): boolean {
+  let scope = "";
+  for (const raw of header.toLowerCase().split(",")) {
+    let token = raw.trim();
+    const m = /^([a-z0-9_-]+)\s*:\s*(.*)$/.exec(token);
+    if (m && !VALUED_DIRECTIVES.has(m[1])) {
+      scope = m[1];
+      token = m[2];
+    }
+    if ((scope === "" || scope === "googlebot") && hasNoindex(token)) return true;
+  }
+  return false;
 }
 
 /* ------------------------------------------------------------------ */
