@@ -160,11 +160,20 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     };
   }
 
-  const browser = await getSharedBrowser(chromium);
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)",
-    bypassCSP: true,
-  });
+  let context: any;
+  try {
+    const browser = await getSharedBrowser(chromium);
+    if (!browser.isConnected()) throw new Error("browser disconnected");
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)",
+      bypassCSP: true,
+    });
+  } catch (err: any) {
+    // Chromium crashed or failed to launch: drop it so the next page relaunches,
+    // and report this page as a render failure instead of throwing out of the crawl.
+    sharedBrowserPromise = null;
+    return { html: "", finalUrl: url, status: 0, errorMessage: `Render failed: ${err?.message ?? err}` };
+  }
 
   try {
     if (blockHeavyResources) {

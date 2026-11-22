@@ -145,7 +145,7 @@ program
   .option("--production-origin <origin>", "Production origin for staging/local audits (rewrites sitemap/seed URLs and treats its canonical/hreflang/og URLs as same-site)")
   .option("--resume <crawlId>", "Resume an interrupted or stopped crawl from its checkpoint (same URL)")
   .option("--all-sitemap", "Crawl every sitemap URL: sets strategy=sitemap and raises the default limit to 200000")
-  .action(async (url: string | undefined, options) => {
+  .action(async (url: string | undefined, options, command: Command) => {
     const config = await loadConfig().catch(() => null);
     let targetUrl = url;
     let extra: CrawlOptions = {};
@@ -186,17 +186,27 @@ program
     }
 
     const opts: CrawlOptions = {
-      maxDepth: parseInt(options.depth, 10),
-      limit: parseInt(options.limit, 10),
-      concurrency: parseInt(options.concurrency, 10),
+      maxDepth: intOption(options.depth, "--depth"),
+      limit: intOption(options.limit, "--limit"),
+      concurrency: intOption(options.concurrency, "--concurrency"),
       render: !!options.render,
       reach: !!options.reach,
       strategy: options.strategy,
-      sampleSitemap: options.sample ? parseInt(options.sample, 10) : undefined,
+      sampleSitemap: options.sample ? intOption(options.sample, "--sample") : undefined,
       respectRobots: options.robots !== false,
       checkExternalLinks: options.external !== false,
       ...extra,
     };
+    // Flags typed on the command line beat seoforge.config.json values (config mode).
+    const fromCli = (name: string) => command.getOptionValueSource(name) === "cli";
+    if (fromCli("depth")) opts.maxDepth = intOption(options.depth, "--depth");
+    if (fromCli("limit")) opts.limit = intOption(options.limit, "--limit");
+    if (fromCli("concurrency")) opts.concurrency = intOption(options.concurrency, "--concurrency");
+    if (fromCli("render")) opts.render = true;
+    if (fromCli("reach")) opts.reach = true;
+    if (fromCli("external")) opts.checkExternalLinks = false;
+    if (fromCli("robots")) opts.respectRobots = false;
+    if (fromCli("strategy")) opts.strategy = options.strategy;
     if (options.allSitemap) opts.strategy = "sitemap";
     if (options.maxRps !== undefined) {
       const rps = Number(options.maxRps);
@@ -676,6 +686,16 @@ function splitCsvLine(line: string): string[] {
  * collector is supplied, so every "repeatable" flag uses this to build an
  * array — including for the first, and for zero, occurrences.
  */
+/** Parse a non-negative integer flag or exit: NaN must never reach a limit or a CI gate. */
+function intOption(value: string, flag: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    console.error(red(`${flag} must be a non-negative integer, got '${value}'.`));
+    process.exit(1);
+  }
+  return n;
+}
+
 function collect(value: string, previous: string[] = []): string[] {
   return [...previous, value];
 }
@@ -1016,7 +1036,8 @@ program
       }
     }
     for (const [host, list] of byHost.entries()) {
-      const res = await submitToIndexNow({ host, key, urlList: list });
+      // Same key file location as the `indexnow` command, or engines reject the key.
+      const res = await submitToIndexNow({ host, key, keyLocation: config.indexnow?.keyLocation, urlList: list });
       if (res.success) console.log(green(`✔ [${host}] ${res.message}`));
       else console.log(yellow(`⚠ [${host}] ${res.message}`));
     }
@@ -1251,9 +1272,9 @@ program
       process.exit(1);
     }
     const gate = evaluateCiGate(crawl, {
-      maxErrors: parseInt(options.maxErrors, 10),
-      maxWarnings: parseInt(options.maxWarnings, 10),
-      minAeoScore: parseInt(options.minAeo, 10),
+      maxErrors: intOption(options.maxErrors, "--max-errors"),
+      maxWarnings: intOption(options.maxWarnings, "--max-warnings"),
+      minAeoScore: intOption(options.minAeo, "--min-aeo"),
     });
     console.log(gate.markdownReport);
     if (options.out) {
@@ -1329,7 +1350,9 @@ program
   .action(async (fileOrUrl, testPath, options) => {
     let content = "";
     if (fileOrUrl.startsWith("http://") || fileOrUrl.startsWith("https://")) {
-      const fetched = await fetchPage(fileOrUrl);
+      const u = new URL(fileOrUrl);
+      const robotsUrl = u.pathname.endsWith("robots.txt") ? u.href : `${u.origin}/robots.txt`;
+      const fetched = await fetchPage(robotsUrl);
       content = fetched.html;
     } else {
       content = await fs.readFile(fileOrUrl, "utf-8");
@@ -1401,18 +1424,18 @@ program
   .description("Zero-shot time series forecasting and anomaly detection via Google Research TimesFM")
   .option("-m, --metric <name>", "Crawl metric: aeo, errors, warnings, notices, urls", "aeo")
   .option("-H, --horizon <number>", "Forecast horizon in steps/intervals", "7")
-  .option("-f, --freq <frequency>", "Frequency: daily, weekly, monthly, crawl", "daily")
+  .option("-f, --freq <frequency>", "Frequency: daily, weekly, monthly, crawl (default: daily for --series, crawl for crawl history)")
   .option("-s, --series <numbers>", "Comma-separated manual time series (e.g. 10,12,15,14,18)")
   .option("--json", "Output raw JSON result instead of formatted markdown")
   .action(async (url, options) => {
     const horizon = parseInt(options.horizon, 10) || 7;
-    const freq = options.freq || "daily";
+    const freq = options.freq;
 
     if (options.series) {
-      const numbers = options.series.split(",").map((s: string) => parseFloat(s.trim())).filter((n: number) => !isNaN(n));
+      const numbers = options.series.split(",").map((s: string) => parseFloat(s.trim())).filter((n: number) => Number.isFinite(n));
       const res = timesfmForecast(numbers, {
         horizon,
-        freq,
+        freq: freq || "daily",
         metricName: options.metric || "Custom Series",
       });
       if (options.json) {

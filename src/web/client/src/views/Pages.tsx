@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, PagedResult, PageRow, severityBg } from "../lib/api.js";
-import { Card, Badge, Input, Select, Spinner, EmptyState, StatusDot, Button } from "../components/ui.js";
+import { useApi, PagedResult, PageRow, severityBg, safeHref } from "../lib/api.js";
+import { Card, Badge, Input, Select, Spinner, EmptyState, ErrorState, StatusDot, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 import { Pager } from "./Issues.js";
 
@@ -14,7 +14,6 @@ const CHIP_KEYS: Record<string, (v: string) => string> = {
 
 export default function Pages({ crawlId }: { crawlId: string }) {
   const [params, setParams] = useSearchParams();
-  const [data, setData] = useState<PagedResult<PageRow> | null>(null);
   const [search, setSearch] = useState(params.get("q") ?? "");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -48,18 +47,15 @@ export default function Pages({ crawlId }: { crawlId: string }) {
     setPage(1);
   }, [search, params]);
 
-  useEffect(() => {
-    const q = new URLSearchParams(params);
-    q.delete("q");
-    q.set("page", String(page));
-    q.set("pageSize", String(pageSize));
-    if (search) q.set("search", search);
-    api<PagedResult<PageRow>>(`/api/crawl/${crawlId}/pages?${q.toString()}`)
-      .then((r) => setData(r))
-      .catch(() => setData(null));
-  }, [crawlId, search, params, page]);
+  const q = new URLSearchParams(params);
+  q.delete("q");
+  q.set("page", String(page));
+  q.set("pageSize", String(pageSize));
+  if (search) q.set("search", search);
+  // Aborts the superseded request: no stale page/filter response can overwrite the current one.
+  const { data, error } = useApi<PagedResult<PageRow>>(`/api/crawl/${crawlId}/pages?${q.toString()}`);
 
-  if (!data) return <Spinner label="Loading pages…" />;
+  if (!data) return error ? <ErrorState message={error} /> : <Spinner label="Loading pages…" />;
 
   const chips = Object.keys(CHIP_KEYS).filter((k) => params.get(k));
   const Th = ({ col, label, align = "right" }: { col?: string; label: string; align?: "left" | "right" }) => (
@@ -143,7 +139,7 @@ export default function Pages({ crawlId }: { crawlId: string }) {
                     >
                       <td className="p-3 max-w-xs truncate">
                         <a
-                          href={p.url}
+                          href={safeHref(p.url)}
                           target="_blank"
                           rel="noreferrer"
                           className="text-sky-400 hover:text-sky-300 transition-colors"

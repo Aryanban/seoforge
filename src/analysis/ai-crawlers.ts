@@ -84,24 +84,26 @@ export function auditAiBotPosture(robotsTxt: string): AiPostureReport {
     else lastWasAgent = false;
   }
 
-  const stateFor = (tokenLower: string): { dis: boolean; allow: boolean } => {
-    let dis = false; let allow = false;
+  const stateFor = (tokenLower: string): { dis: boolean; allow: boolean; matched: boolean } => {
+    let dis = false; let allow = false; let matched = false;
     for (const g of groups) {
       if (!g.agents.includes(tokenLower)) continue;
+      matched = true;
       if (g.disallows.some((d) => d === "/" || d === "/*" || d === "")) {
         if (g.disallows.some((d) => d === "")) allow = true;
         else if (!g.allows.some((a) => a === "/")) dis = true;
       }
       if (g.allows.some((a) => a === "/")) { allow = true; dis = false; }
     }
-    return { dis, allow };
+    return { dis, allow, matched };
   };
   const wildcard = stateFor("*");
 
   const rules: AiBotRuleState[] = AI_BOTS.map((b) => {
     const s = stateFor(b.token.toLowerCase());
-    const disallowed = s.dis || (!s.allow && wildcard.dis);
-    return { token: b.token, role: b.role, operator: b.operator, disallowed, allowed: s.allow || (!disallowed), coveredByWildcard: wildcard.dis && !s.allow };
+    // RFC 9309 §2.2.1: a crawler with its own group obeys only that group; "*" applies otherwise.
+    const disallowed = s.matched ? s.dis : wildcard.dis;
+    return { token: b.token, role: b.role, operator: b.operator, disallowed, allowed: !disallowed, coveredByWildcard: !s.matched && wildcard.dis };
   });
 
   const blockedSearchBots = rules.filter((r) => r.role === "ai-search" && r.disallowed).map((r) => r.token);

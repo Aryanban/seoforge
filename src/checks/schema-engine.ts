@@ -46,6 +46,11 @@ export function validateSchemaOrg(
       return;
     }
 
+    // `null`, numbers and strings are valid JSON but not JSON-LD (and would throw below).
+    if (!parsed || typeof parsed !== "object") {
+      schemaOrgErrors.push("JSON-LD block is not an object or array.");
+      return;
+    }
     const nodes: any[] = [];
     let topLevelContext: string | undefined;
     if (Array.isArray(parsed)) {

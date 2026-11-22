@@ -18,8 +18,21 @@ import { buildIssueSummary } from "../checks/summary.js";
 
 type Row = Record<string, any>;
 
+/** 1-based page number; NaN/garbage from a query string → 1. */
+function pageOf(page: number | undefined): number {
+  return Number.isFinite(page) ? Math.max(1, Math.floor(page!)) : 1;
+}
+
+/** Rows per page: NaN/garbage → 50, capped at `max`; Infinity → -1 (SQLite "no limit"). */
+function pageSizeOf(size: number | undefined, max: number): number {
+  if (size === Infinity) return -1;
+  return Number.isFinite(size) ? Math.min(max, Math.max(1, Math.floor(size!))) : 50;
+}
+
 export function saveCrawl(db: DatabaseSync, result: CrawlResult): void {
   const tx = db.exec.bind(db);
+  tx("BEGIN");
+  try {
   db.prepare(
     `INSERT OR REPLACE INTO crawls
       (id, target_url, domain_name, project, strategy, status, started_at, finished_at,
@@ -48,8 +61,6 @@ export function saveCrawl(db: DatabaseSync, result: CrawlResult): void {
     JSON.stringify(result.options)
   );
 
-  tx("BEGIN");
-  try {
     const insertPage = db.prepare(
       `INSERT OR REPLACE INTO pages
         (crawl_id, url, normalized_url, final_url, status, response_time_ms, ttfb_ms, depth,
@@ -240,8 +251,8 @@ export function getIssues(db: DatabaseSync, crawlId: string, filter: IssueFilter
     params.push(`%${filter.search}%`, `%${filter.search}%`, `%${filter.search}%`);
   }
 
-  const page = Math.max(1, filter.page ?? 1);
-  const pageSize = Math.min(200, Math.max(1, filter.pageSize ?? 50));
+  const page = pageOf(filter.page);
+  const pageSize = Math.max(1, pageSizeOf(filter.pageSize, 200));
   const offset = (page - 1) * pageSize;
 
   const totalRow = db
@@ -349,18 +360,15 @@ function queryPageRows(db: DatabaseSync, crawlId: string, filter: PageFilter): {
     where.push("is_orphan = 1");
   }
 
-  const page = Math.max(1, filter.page ?? 1);
-  // Clamped for safety, but high enough that getFullCrawl (which passes a
-  // large pageSize) reconstructs the *whole* crawl instead of silently
-  // truncating at 500 pages — otherwise exports/issue counts are wrong for
-  // any site larger than 500 pages.
-  const pageSize = Math.min(50_000, Math.max(1, filter.pageSize ?? 50));
-  const offset = (page - 1) * pageSize;
+  const page = pageOf(filter.page);
+  // pageSize Infinity (getFullCrawl) reads the whole crawl; API sizes are capped.
+  const pageSize = pageSizeOf(filter.pageSize, 50_000);
+  const offset = pageSize < 0 ? 0 : (page - 1) * pageSize;
 
   const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM pages WHERE ${where.join(" AND ")}`).get(...params) as Row;
   const total = totalRow?.c ?? 0;
 
-  const sortCol = filter.sort ? PAGE_SORT_COLUMNS[filter.sort] : undefined;
+  const sortCol = filter.sort && Object.hasOwn(PAGE_SORT_COLUMNS, filter.sort) ? PAGE_SORT_COLUMNS[filter.sort] : undefined;
   const order = sortCol ? `${sortCol} ${filter.dir === "desc" ? "DESC" : "ASC"}, url` : "depth, url";
   const rows = db
     .prepare(`SELECT * FROM pages WHERE ${where.join(" AND ")} ORDER BY ${order} LIMIT ? OFFSET ?`)
@@ -497,9 +505,9 @@ export function getLinks(db: DatabaseSync, crawlId: string, filter: LinkFilter =
     params.push(`%${filter.search}%`, `%${filter.search}%`, `%${filter.search}%`);
   }
 
-  const page = Math.max(1, filter.page ?? 1);
-  const pageSize = Math.min(50_000, Math.max(1, filter.pageSize ?? 50));
-  const offset = (page - 1) * pageSize;
+  const page = pageOf(filter.page);
+  const pageSize = pageSizeOf(filter.pageSize, 50_000);
+  const offset = pageSize < 0 ? 0 : (page - 1) * pageSize;
 
   const totalRow = db.prepare(`SELECT COUNT(*) AS c FROM links WHERE ${where.join(" AND ")}`).get(...params) as Row;
   const total = totalRow?.c ?? 0;
@@ -526,7 +534,8 @@ export function getLinks(db: DatabaseSync, crawlId: string, filter: LinkFilter =
 
 export function getRecommendations(db: DatabaseSync, crawlId: string): RecommendationDoc[] {
   const rows = db
-    .prepare("SELECT * FROM recommendations WHERE crawl_id = ? ORDER BY priority, affected_pages DESC")
+    .prepare(`SELECT * FROM recommendations WHERE crawl_id = ?
+       ORDER BY CASE priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END, affected_pages DESC`)
     .all(crawlId) as Row[];
   return rows.map((r) => ({
     id: r.issue_id,
@@ -559,7 +568,7 @@ export function getSitemapUrls(db: DatabaseSync, crawlId: string, limit = 200) {
  */
 export function getPreviousIssueCounts(db: DatabaseSync, targetUrl: string): Record<string, number> {
   const prev = db
-    .prepare("SELECT id FROM crawls WHERE target_url = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1, 1")
+    .prepare("SELECT id FROM crawls WHERE target_url = ? AND status = 'completed' ORDER BY started_at DESC LIMIT 1")
     .get(targetUrl) as Row | undefined;
 
   if (!prev) return {};
@@ -580,9 +589,10 @@ export function getTrend(db: DatabaseSync, targetUrl: string, limit = 30) {
     .prepare(
       `SELECT id, started_at, total_urls, total_errors, total_warnings, total_notices, average_aeo_score
        FROM crawls WHERE target_url = ? AND status = 'completed'
-       ORDER BY started_at ASC LIMIT ?`
+       ORDER BY started_at DESC LIMIT ?`
     )
-    .all(targetUrl, limit) as Row[];
+    .all(targetUrl, limit)
+    .reverse() as Row[];
   return rows.map((r) => ({
     crawlId: r.id,
     date: r.started_at,
@@ -615,7 +625,7 @@ export function getFullCrawl(db: DatabaseSync, crawlId: string): CrawlResult | n
   const base = getCrawl(db, crawlId);
   if (!base) return null;
 
-  const { rows: pages } = getPages(db, crawlId, { pageSize: 500000 });
+  const { rows: pages } = getPages(db, crawlId, { pageSize: Infinity });
   const allIssues = listAuditIssues(db, crawlId);
   const issuesByUrl = new Map<string, AuditIssue[]>();
   for (const i of allIssues) {
@@ -629,7 +639,7 @@ export function getFullCrawl(db: DatabaseSync, crawlId: string): CrawlResult | n
     p.issues = pi.map((i) => `[${i.severity}] ${i.name}`);
   }
 
-  const { rows: links } = getLinks(db, crawlId, { pageSize: 1000000 });
+  const { rows: links } = getLinks(db, crawlId, { pageSize: Infinity });
   const recommendations = getRecommendations(db, crawlId);
   const sitemaps = getSitemapUrls(db, crawlId, 500000);
 

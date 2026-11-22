@@ -29,13 +29,14 @@ export function analyzeAccessibility(htmlOrCheerio: string | cheerio.CheerioAPI)
     const alt = $(el).attr("alt");
     const role = $(el).attr("role");
     if (role === "presentation" || role === "none") return false;
-    return alt === undefined || alt.trim() === "";
+    // alt="" is the correct markup for decorative images (WCAG H67); only a missing alt fails.
+    return alt === undefined;
   }).length;
   if (badImgs > 0) findings.push({ id: "a11y_image_alt", name: "Images missing accessible names", severity: "Error", message: `${badImgs} <img> element(s) lack a usable alt attribute (axe image-alt, WCAG 1.1.1). Decorative images should use alt="".`, count: badImgs });
 
   const lang = $("html").attr("lang");
   if (!lang) findings.push({ id: "a11y_html_lang_missing", name: "Missing document language declaration", severity: "Error", message: "<html> has no lang attribute (axe html-has-lang, WCAG 3.1.1). Screen readers cannot select pronunciation rules." });
-  else if (!/^[a-z]{2,3}(-[A-Za-z]{2,8})?$/.test(lang.trim())) findings.push({ id: "a11y_html_lang_invalid", name: "Invalid document language code", severity: "Warning", message: `lang="${lang}" is not a valid BCP-47 language tag (e.g. en, en-IN, hi).` });
+  else if (!/^[a-z]{2,3}(-[a-z0-9]{2,8})*$/i.test(lang.trim())) findings.push({ id: "a11y_html_lang_invalid", name: "Invalid document language code", severity: "Warning", message: `lang="${lang}" is not a valid BCP-47 language tag (e.g. en, en-IN, hi).` });
 
   let lastLevel = 0; let badOrder = false;
   $(":header").each((_, el) => {

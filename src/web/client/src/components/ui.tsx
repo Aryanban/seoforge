@@ -179,6 +179,21 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
   );
 }
 
+/** A failed request: say what happened and offer a retry, instead of an endless spinner. */
+export function ErrorState({ message }: { message: string }) {
+  return (
+    <div role="alert" className="text-center py-16 animate-fade-in">
+      <div className="text-red-300 text-sm">Couldn't load this data: {message}</div>
+      <button
+        onClick={() => window.location.reload()}
+        className="mt-3 text-xs text-muted underline underline-offset-2 hover:text-text"
+      >
+        Reload the page
+      </button>
+    </div>
+  );
+}
+
 export function Skeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div className="space-y-2.5 p-4">

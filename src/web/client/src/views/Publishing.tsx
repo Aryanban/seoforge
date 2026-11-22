@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../lib/api.js";
+import { api, safeHref } from "../lib/api.js";
 import { Card, Button, Badge, Input, Select, Spinner, EmptyState, PageHeader } from "../components/ui.js";
 
 interface CatalogEntry {
@@ -129,7 +129,7 @@ export default function Publishing() {
           <div className="flex gap-3 mb-4 flex-wrap">
             <Select
               value={statusFilter}
-              onChange={(e: any) => setStatusFilter(e.target.value)}
+              onChange={(v: string) => setStatusFilter(v)}
               className="text-xs"
             >
               <option value="">All review statuses</option>
@@ -141,7 +141,7 @@ export default function Publishing() {
             <Input
               placeholder="Filter by format (article, community…)"
               value={kindFilter}
-              onChange={(e: any) => setKindFilter(e.target.value)}
+              onChange={(v: string) => setKindFilter(v)}
               className="text-xs"
             />
           </div>
@@ -170,7 +170,7 @@ export default function Publishing() {
                     {entries.map((e) => (
                       <tr key={e.id} className="border-b border-border hover:bg-panel2/50">
                         <td className="p-2.5">
-                          <a href={e.website_url} target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 text-xs">
+                          <a href={safeHref(e.website_url)} target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 text-xs">
                             {e.name}
                           </a>
                         </td>
@@ -201,11 +201,11 @@ export default function Publishing() {
           <Card className="p-5">
             <h2 className="text-sm font-semibold mb-4">Business profile</h2>
             <div className="space-y-3">
-              <Input placeholder="Business name *" value={form.business} onChange={(e: any) => setForm({ ...form, business: e.target.value })} />
-              <Input placeholder="Website URL *" value={form.website} onChange={(e: any) => setForm({ ...form, website: e.target.value })} />
-              <Input placeholder="Audience *" value={form.audience} onChange={(e: any) => setForm({ ...form, audience: e.target.value })} />
-              <Input placeholder="Topics, comma-separated (technology, business…)" value={form.topics} onChange={(e: any) => setForm({ ...form, topics: e.target.value })} />
-              <Input placeholder="Posts per week (1-7)" value={form.posts_per_week} onChange={(e: any) => setForm({ ...form, posts_per_week: e.target.value })} />
+              <Input placeholder="Business name *" value={form.business} onChange={(v: string) => setForm({ ...form, business: v })} />
+              <Input placeholder="Website URL *" value={form.website} onChange={(v: string) => setForm({ ...form, website: v })} />
+              <Input placeholder="Audience *" value={form.audience} onChange={(v: string) => setForm({ ...form, audience: v })} />
+              <Input placeholder="Topics, comma-separated (technology, business…)" value={form.topics} onChange={(v: string) => setForm({ ...form, topics: v })} />
+              <Input placeholder="Posts per week (1-7)" value={form.posts_per_week} onChange={(v: string) => setForm({ ...form, posts_per_week: v })} />
               <div>
                 <div className="text-[10px] uppercase tracking-wide text-faint mb-1">Target pages (one per line: url | topic)</div>
                 <textarea
@@ -244,7 +244,7 @@ export default function Publishing() {
                     <div key={t.position} className="border border-border rounded-md p-3">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-xs font-bold tabular-nums text-muted">{t.position}.</span>
-                        <a href={t.posting_url} target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 text-xs font-semibold">
+                        <a href={safeHref(t.posting_url)} target="_blank" rel="noreferrer" className="text-sky-400 hover:text-sky-300 text-xs font-semibold">
                           {t.website}
                         </a>
                         <Badge className="bg-zinc-500/15 text-zinc-400">{t.format}</Badge>

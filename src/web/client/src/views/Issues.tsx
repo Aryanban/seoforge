@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, PagedResult, IssueRow, severityBg } from "../lib/api.js";
-import { Card, Badge, Input, Select, Spinner, EmptyState, Button } from "../components/ui.js";
+import { api, useApi, PagedResult, IssueRow, severityBg, safeHref } from "../lib/api.js";
+import { Card, Badge, Input, Select, Spinner, EmptyState, ErrorState, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 
 export default function Issues({ crawlId }: { crawlId: string }) {
   const [params] = useSearchParams();
-  const [data, setData] = useState<PagedResult<IssueRow> | null>(null);
   const [severity, setSeverity] = useState(params.get("severity") ?? "all");
   const [category, setCategory] = useState(params.get("category") ?? "all");
   const [search, setSearch] = useState(params.get("q") ?? "");
@@ -25,17 +24,14 @@ export default function Issues({ crawlId }: { crawlId: string }) {
     setPage(1);
   }, [severity, category, search]);
 
-  useEffect(() => {
-    const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-    if (severity !== "all") q.set("severity", severity);
-    if (category !== "all") q.set("category", category);
-    if (search) q.set("search", search);
-    api<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?${q.toString()}`)
-      .then(setData)
-      .catch(() => setData(null));
-  }, [crawlId, severity, category, search, page]);
+  const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (severity !== "all") q.set("severity", severity);
+  if (category !== "all") q.set("category", category);
+  if (search) q.set("search", search);
+  // useApi aborts the previous request, so a late page-3 response can't land under "page 1".
+  const { data, error } = useApi<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?${q.toString()}`);
 
-  if (!data) return <Spinner label="Loading issues…" />;
+  if (!data) return error ? <ErrorState message={error} /> : <Spinner label="Loading issues…" />;
 
   return (
     <div>
@@ -119,7 +115,7 @@ export default function Issues({ crawlId }: { crawlId: string }) {
                             {issue.affectedUrls.slice(0, 15).map((u) => (
                               <a
                                 key={u}
-                                href={u}
+                                href={safeHref(u)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="block text-sky-400 hover:text-sky-300 text-xs truncate transition-colors"

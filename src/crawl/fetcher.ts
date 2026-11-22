@@ -254,7 +254,7 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           finalUrl: current,
           requestedUrl: url,
           redirected: true,
-          redirectChain: Array.from(new Set(chain)),
+          redirectChain: chain, // not deduped: the repeated URL is what marks the loop
           redirectStatusCode: firstRedirectCode,
           errorMessage: `Redirect loop detected: ${chain.join(" → ")}`,
         };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../lib/api.js";
+import { api, safeHref } from "../lib/api.js";
 import { Card, Button, Badge, Input, EmptyState, PageHeader } from "../components/ui.js";
 
 interface AssessmentRow {
@@ -137,9 +137,9 @@ export default function Reputation() {
         <Card className="p-5">
           <h2 className="text-sm font-semibold mb-4">Verify sources</h2>
           <div className="space-y-3">
-            <Input placeholder="Your site URL *" value={form.target} onChange={(e: any) => setForm({ ...form, target: e.target.value })} />
-            <Input placeholder="Brand name *" value={form.brand} onChange={(e: any) => setForm({ ...form, brand: e.target.value })} />
-            <Input placeholder="Brand aliases (comma-separated)" value={form.aliases} onChange={(e: any) => setForm({ ...form, aliases: e.target.value })} />
+            <Input placeholder="Your site URL *" value={form.target} onChange={(v: string) => setForm({ ...form, target: v })} />
+            <Input placeholder="Brand name *" value={form.brand} onChange={(v: string) => setForm({ ...form, brand: v })} />
+            <Input placeholder="Brand aliases (comma-separated)" value={form.aliases} onChange={(v: string) => setForm({ ...form, aliases: v })} />
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-wide text-faint">Candidate source URLs (one per line)</span>
@@ -196,7 +196,7 @@ export default function Reputation() {
                   {result.result.top_backlinks.slice(0, 5).map((s: any) => (
                     <a
                       key={s.source_url}
-                      href={s.source_url}
+                      href={safeHref(s.source_url)}
                       target="_blank"
                       rel="noreferrer"
                       className="block text-sky-400 hover:text-sky-300 text-xs truncate"

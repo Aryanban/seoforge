@@ -1,22 +1,16 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { useNavigate } from "react-router-dom";
-import { api, CrawlSummary, PagedResult, IssueRow, CrawlStats, severityBg } from "../lib/api.js";
-import { Card, Badge, Spinner, EmptyState, PageHeader } from "../components/ui.js";
+import { useApi, CrawlSummary, PagedResult, IssueRow, CrawlStats, severityBg } from "../lib/api.js";
+import { Card, Badge, Spinner, EmptyState, ErrorState, PageHeader } from "../components/ui.js";
 import { ScoreDial, BarList, StackedBarList, ColumnChart, LineChart, TONE } from "../components/charts.js";
 
 export default function Overview({ crawlId, crawl }: { crawlId: string; crawl: CrawlSummary | null }) {
-  const [issues, setIssues] = useState<PagedResult<IssueRow> | null>(null);
-  const [stats, setStats] = useState<CrawlStats | null>(null);
-  const [trend, setTrend] = useState<any[]>([]);
+  const { data: issues } = useApi<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?pageSize=8`);
+  const { data: stats, error } = useApi<CrawlStats>(`/api/crawl/${crawlId}/stats`);
+  const trend = useApi<any[]>(`/api/crawl/${crawlId}/trend`).data ?? [];
   const navigate = useNavigate();
 
-  useEffect(() => {
-    setStats(null);
-    api<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?pageSize=8`).then(setIssues).catch(() => setIssues(null));
-    api<CrawlStats>(`/api/crawl/${crawlId}/stats`).then(setStats).catch(() => setStats(null));
-    api<any[]>(`/api/crawl/${crawlId}/trend`).then(setTrend).catch(() => setTrend([]));
-  }, [crawlId]);
-
+  if (error && !stats) return <ErrorState message={error} />;
   if (!crawl || !stats) return <Spinner label="Loading overview…" />;
 
   const pages = (q: string) => navigate(`/pages?${q}`);

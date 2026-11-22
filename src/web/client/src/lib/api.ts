@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 const BASE = "";
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -10,6 +12,40 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
+}
+
+/**
+ * Only http(s) URLs become clickable. Crawled and sitemap URLs are untrusted:
+ * a `javascript:` <loc> would otherwise run script in the dashboard's origin.
+ */
+export function safeHref(url: string | undefined | null): string | undefined {
+  return url && /^https?:\/\//i.test(url.trim()) ? url : undefined;
+}
+
+/**
+ * GET `path` and track the result. Switching `path` aborts the old request, so a
+ * slow response for a previous crawl or filter can never overwrite newer data,
+ * and a failure is reported as `error` instead of leaving the view loading forever.
+ * The last data stays visible while the next request loads. `null` path = idle.
+ */
+export function useApi<T>(path: string | null): { data: T | null; error: string | null; loading: boolean } {
+  const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({
+    data: null,
+    error: null,
+    loading: path !== null,
+  });
+  useEffect(() => {
+    if (path === null) return;
+    const ctrl = new AbortController();
+    setState((s) => ({ ...s, error: null, loading: true }));
+    api<T>(path, { signal: ctrl.signal })
+      .then((data) => setState({ data, error: null, loading: false }))
+      .catch((e: any) => {
+        if (!ctrl.signal.aborted) setState((s) => ({ ...s, error: e?.message ?? "Request failed", loading: false }));
+      });
+    return () => ctrl.abort();
+  }, [path]);
+  return state;
 }
 
 export interface CrawlSummary {

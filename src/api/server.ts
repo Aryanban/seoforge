@@ -18,7 +18,7 @@ import {
 import { Crawler, crawlSite } from "../crawl/crawler.js";
 import { openStore, closeStore, migrateLegacySnapshots } from "../store/db.js";
 import * as repo from "../store/repository.js";
-import { loadConfig } from "../config.js";
+import { loadConfig, validateConfig } from "../config.js";
 import { generateCrawlMarkdown } from "../report/markdown.js";
 import { toCsv, CsvKind } from "../report/csv.js";
 import { generateHtmlReport } from "../report/html.js";
@@ -88,7 +88,9 @@ interface RunningJob {
   startedAt: string;
   lastProgress?: CrawlProgress;
   result?: CrawlResult;
-  subscribers: Set<(data: string) => void>;
+  /** Set when the crawl rejected, so a reconnecting client still gets the error. */
+  failed?: string;
+  subscribers: Set<(data: string, event: string) => void>;
 }
 
 const jobs = new Map<string, RunningJob>();
@@ -118,6 +120,20 @@ export interface ServerOptions {
 export function createServer(options: ServerOptions = {}): Hono {
   const app = new Hono();
   const baseDir = options.baseDir || process.cwd();
+
+  // Cross-site request guard. A page on any other site can send a "simple" text/plain
+  // POST to localhost without a CORS preflight, which would let it start crawls or
+  // write files via out_dir. Requiring a JSON body forces a preflight, which is never
+  // granted (no CORS headers); the dashboard always sends application/json.
+  app.use("/api/*", async (c, next) => {
+    if (c.req.method !== "GET" && c.req.method !== "HEAD" && c.req.method !== "OPTIONS") {
+      const type = c.req.header("content-type") || "";
+      if (!type.toLowerCase().startsWith("application/json")) {
+        return c.json({ error: "Write requests must use Content-Type: application/json" }, 415);
+      }
+    }
+    await next();
+  });
   const db = openStore(path.join(baseDir, "reports", "seoforge.db"));
 
   migrateLegacySnapshots(baseDir).catch(() => {});
@@ -147,6 +163,7 @@ export function createServer(options: ServerOptions = {}): Hono {
   app.put("/api/config", async (c) => {
     try {
       const body = (await c.req.json()) as SeoForgeConfig;
+      validateConfig(body); // reject an invalid config instead of writing it
       const configPath = path.resolve(baseDir, options.configPath || "seoforge.config.json");
       await fs.writeFile(configPath, JSON.stringify(body, null, 2), "utf-8");
       return c.json({ saved: true });
@@ -238,6 +255,14 @@ export function createServer(options: ServerOptions = {}): Hono {
           jobs.delete(crawlId);
           job.subscribers.clear();
         }, 60000);
+      }).catch((err: any) => {
+        console.error("Crawl failed:", err);
+        job.failed = String(err?.message ?? err);
+        broadcast(job, { type: "error", crawlId, message: job.failed });
+        setTimeout(() => {
+          jobs.delete(crawlId);
+          job.subscribers.clear();
+        }, 60000);
       });
 
       return c.json({ crawlId, targetUrl, options: opts, status: "running" });
@@ -265,8 +290,12 @@ export function createServer(options: ServerOptions = {}): Hono {
       const crawlId = c.req.param("id");
       const job = getJob(crawlId);
 
-      const send = (data: string) => {
-        stream.writeSSE({ event: "progress", data }).catch(() => {});
+      let finish = () => {};
+      const send = (data: string, event: string) => {
+        const written = stream.writeSSE({ event, data }).catch(() => {});
+        // Close only once done/error has actually been flushed; closing right after
+        // starting the write dropped the event and left the client reconnecting.
+        if (event === "done" || event === "error") written.finally(() => finish());
       };
 
       if (!job) {
@@ -279,6 +308,16 @@ export function createServer(options: ServerOptions = {}): Hono {
         return;
       }
 
+      // Reconnected after the crawl finished: deliver the result instead of an empty stream.
+      if (job.result !== undefined) {
+        await stream.writeSSE({ event: "done", data: JSON.stringify(summarize(job.result)) });
+        return;
+      }
+      if (job.failed !== undefined) {
+        await stream.writeSSE({ event: "error", data: JSON.stringify({ type: "error", crawlId, message: job.failed }) });
+        return;
+      }
+
       job.subscribers.add(send);
       if (job.lastProgress) await stream.writeSSE({ event: "progress", data: JSON.stringify(job.lastProgress) });
 
@@ -288,9 +327,9 @@ export function createServer(options: ServerOptions = {}): Hono {
           job.subscribers.delete(send);
           resolve();
         };
-        job.crawler.once("done", cleanup);
+        finish = cleanup;
         c.req.raw.signal.addEventListener("abort", cleanup, { once: true });
-        if (job.result !== undefined || !jobs.has(crawlId)) cleanup();
+        if (!jobs.has(crawlId)) cleanup();
       });
     })
   );
@@ -300,7 +339,7 @@ export function createServer(options: ServerOptions = {}): Hono {
   /* ---------------------------------------------------------------- */
 
   app.get("/api/crawls", (c) => {
-    const limit = parseInt(c.req.query("limit") || "25", 10);
+    const limit = Math.min(500, Math.max(1, parseInt(c.req.query("limit") || "25", 10) || 25));
     const targetUrl = c.req.query("url");
     return c.json(repo.listCrawls(db, limit, targetUrl));
   });
@@ -582,7 +621,7 @@ export function createServer(options: ServerOptions = {}): Hono {
       kind: c.req.query("kind") || undefined,
       status: c.req.query("status") || undefined,
     });
-    const limit = c.req.query("limit") ? parseInt(c.req.query("limit")!, 10) : rows.length;
+    const limit = parseInt(c.req.query("limit") ?? "", 10) || rows.length;
     return c.json({ total: catalogSize(), matching: rows.length, entries: rows.slice(0, limit) });
   });
 
@@ -1069,9 +1108,12 @@ function summarize(result: CrawlResult) {
 
 function broadcast(job: RunningJob, payload: any): void {
   const data = JSON.stringify(payload);
+  // Each payload goes out under its own SSE event name (progress / page / issue / done / error),
+  // so the dashboard's "progress" handler never receives page or issue payloads.
+  const event: string = payload?.type ?? "progress";
   for (const send of job.subscribers) {
     try {
-      send(data);
+      send(data, event);
     } catch {
       job.subscribers.delete(send);
     }

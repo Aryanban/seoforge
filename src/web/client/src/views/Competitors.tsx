@@ -17,8 +17,8 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
   const [history, setHistory] = useState<ComparisonRow[]>([]);
 
   useEffect(() => {
-    api<{ crawls: CrawlSummary[] }>(`/api/crawls?limit=30`)
-      .then((r) => setCrawls(r.crawls ?? []))
+    api<CrawlSummary[]>(`/api/crawls?limit=30`)
+      .then((r) => setCrawls(Array.isArray(r) ? r : []))
       .catch(() => setCrawls([]));
     api<{ comparisons: ComparisonRow[] }>(`/api/competitors`)
       .then((r) => setHistory(r.comparisons))

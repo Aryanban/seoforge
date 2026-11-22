@@ -71,7 +71,9 @@ export function checkSoft404(page: {
   for (const pat of TITLE_404_PATTERNS) {
     if (pat.test(title)) {
       signals.push(`Page title matches 404 signature: "${title}"`);
-      score += 45;
+      // Error-page titles are short ("Page not found | Brand"); a long headline that merely
+      // mentions "not found" needs corroboration from other signals to reach the threshold.
+      score += title.split(/\s+/).length <= 8 ? 45 : 20;
       break;
     }
   }
@@ -87,8 +89,8 @@ export function checkSoft404(page: {
 
   // 3. Canonical pointing to a 404/error page
   if (page.canonical) {
-    const canonLower = page.canonical.toLowerCase();
-    if (canonLower.includes("/404") || canonLower.includes("/not-found") || canonLower.includes("/error")) {
+    // Whole path segments only: /error-codes-guide or /errors/handbook are real pages.
+    if (/\/(404|not-found|error)(\.[a-z]+)?(\/|\?|#|$)/i.test(page.canonical)) {
       signals.push(`Canonical URL points to error page: "${page.canonical}"`);
       score += 50;
     }

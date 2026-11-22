@@ -81,7 +81,7 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
           applied = true;
           explanation += `Added canonical URL to export const metadata. `;
         }
-        code = code.replace(metadataRegex, `export const metadata = {${inside}};`);
+        code = code.replace(metadataRegex, () => `export const metadata = {${inside}};`);
       } else {
         // Prepend metadata export
         const newMetadataBlock = `import type { Metadata } from "next";\n\nexport const metadata: Metadata = {\n${
@@ -102,9 +102,9 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
   if (framework === "html" || (!applied && code.includes("<head>"))) {
     if (req.fixData.title) {
       if (code.includes("<title>")) {
-        code = code.replace(/<title>.*?<\/title>/i, `<title>${req.fixData.title}</title>`);
+        code = code.replace(/<title>.*?<\/title>/i, () => `<title>${req.fixData.title}</title>`);
       } else {
-        code = code.replace(/<head>/i, `<head>\n  <title>${req.fixData.title}</title>`);
+        code = code.replace(/<head>/i, () => `<head>\n  <title>${req.fixData.title}</title>`);
       }
       applied = true;
       explanation += `Updated <title> tag. `;
@@ -112,9 +112,9 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
 
     if (req.fixData.description) {
       if (/name=["']description["']/i.test(code)) {
-        code = code.replace(/<meta\s+name=["']description["'][^>]*>/i, `<meta name="description" content="${req.fixData.description}">`);
+        code = code.replace(/<meta\s+name=["']description["'][^>]*>/i, () => `<meta name="description" content="${req.fixData.description}">`);
       } else {
-        code = code.replace(/<head>/i, `<head>\n  <meta name="description" content="${req.fixData.description}">`);
+        code = code.replace(/<head>/i, () => `<head>\n  <meta name="description" content="${req.fixData.description}">`);
       }
       applied = true;
       explanation += `Added meta description tag. `;
@@ -122,9 +122,9 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
 
     if (req.fixData.canonicalUrl) {
       if (/rel=["']canonical["']/i.test(code)) {
-        code = code.replace(/<link\s+rel=["']canonical["'][^>]*>/i, `<link rel="canonical" href="${req.fixData.canonicalUrl}">`);
+        code = code.replace(/<link\s+rel=["']canonical["'][^>]*>/i, () => `<link rel="canonical" href="${req.fixData.canonicalUrl}">`);
       } else {
-        code = code.replace(/<head>/i, `<head>\n  <link rel="canonical" href="${req.fixData.canonicalUrl}">`);
+        code = code.replace(/<head>/i, () => `<head>\n  <link rel="canonical" href="${req.fixData.canonicalUrl}">`);
       }
       applied = true;
       explanation += `Added canonical link tag. `;
@@ -132,7 +132,7 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
 
     if (req.fixData.schemaJson) {
       const scriptTag = `\n  <script type="application/ld+json">\n${JSON.stringify(req.fixData.schemaJson, null, 2)}\n  </script>`;
-      code = code.replace(/<\/head>/i, `${scriptTag}\n</head>`);
+      code = code.replace(/<\/head>/i, () => `${scriptTag}\n</head>`);
       applied = true;
       explanation += `Injected JSON-LD Schema snippet into <head>. `;
     }
@@ -145,9 +145,12 @@ export function generateCodePatch(req: PatchRequest): PatchResult {
     const match = code.match(imgRegex);
     if (match && !/alt=["'][^'"]+["']/.test(match[0])) {
       if (/alt=["']["']/.test(match[0])) {
-        code = code.replace(imgRegex, `<img$1>`.replace(/alt=["']["']/, `alt="${req.fixData.imgAlt}"`));
+        // Patch the matched tag itself (the old replacement edited a "<img$1>" template, a no-op).
+        const alt = req.fixData.imgAlt.replace(/"/g, "&quot;");
+        code = code.replace(match[0], () => match[0].replace(/alt=["']["']/, () => `alt="${alt}"`));
       } else {
-        code = code.replace(imgRegex, `<img$1 alt="${req.fixData.imgAlt}">`);
+        const alt = req.fixData.imgAlt.replace(/"/g, "&quot;");
+        code = code.replace(imgRegex, (_m, attrs) => `<img${attrs} alt="${alt}">`);
       }
       applied = true;
       explanation += `Added descriptive alt="${req.fixData.imgAlt}" to image "${req.fixData.imgSrc}". `;

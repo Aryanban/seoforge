@@ -25,6 +25,11 @@ describe("fetchPage body handling", () => {
   let base = "";
   beforeAll(async () => {
     server = http.createServer((req, res) => {
+      if (req.url === "/loop-a" || req.url === "/loop-b") {
+        res.writeHead(302, { Location: req.url === "/loop-a" ? "/loop-b" : "/loop-a" });
+        res.end();
+        return;
+      }
       if (req.url === "/hop") {
         res.writeHead(301, { Location: "/utf8" });
         res.end("moved permanently body");
@@ -51,5 +56,11 @@ describe("fetchPage body handling", () => {
     expect(res.status).toBe(200);
     expect(res.redirectStatusCode).toBe(301);
     expect(res.redirectChain).toEqual([`${base}/hop`, `${base}/utf8`]);
+  });
+
+  it("keeps the repeated hop in a loop's chain so the loop check can see it", async () => {
+    const res = await fetchPage(`${base}/loop-a`);
+    expect(res.status).toBe(311);
+    expect(res.redirectChain).toEqual([`${base}/loop-a`, `${base}/loop-b`, `${base}/loop-a`]);
   });
 });

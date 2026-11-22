@@ -1,7 +1,7 @@
 {
   "name": "seoforge",
   "version": "2.0.0",
-  "description": "Screaming Frog-grade local SEO crawler + Ahrefs-grade audit engine + AEO scoring + web dashboard + 35-tool native MCP server for all AI agents.",
+  "description": "Screaming Frog-grade local SEO crawler + Ahrefs-grade audit engine + AEO scoring + web dashboard + 45-tool native MCP server for all AI agents.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

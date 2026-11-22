@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api, PagedResult, LinkRow } from "../lib/api.js";
+import { api, PagedResult, LinkRow, safeHref } from "../lib/api.js";
 import { Card, Badge, Input, Spinner, EmptyState, StatusDot, Tabs, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 import { Pager } from "./Issues.js";
@@ -61,25 +61,26 @@ export default function Links({ crawlId }: { crawlId: string }) {
   }, [kind, search]);
 
   useEffect(() => {
+    // Responses for a tab/page/search the user has already left are dropped.
+    let live = true;
     if (kind === "opportunities") {
       api<{ total: number; opportunities: LinkOpportunityRow[] }>(`/api/crawl/${crawlId}/link-opportunities`)
-        .then((res) => setOppsData(res.opportunities))
-        .catch(() => setOppsData([]));
-      return;
-    }
-
-    if (kind === "anchors") {
+        .then((res) => live && setOppsData(res.opportunities))
+        .catch(() => live && setOppsData([]));
+    } else if (kind === "anchors") {
       api<AnchorProfileData>(`/api/crawl/${crawlId}/anchor-profile`)
-        .then(setAnchorData)
-        .catch(() => setAnchorData(null));
-      return;
+        .then((res) => live && setAnchorData(res))
+        .catch(() => live && setAnchorData(null));
+    } else {
+      const q = new URLSearchParams({ kind, page: String(page), pageSize: String(pageSize) });
+      if (search) q.set("search", search);
+      api<PagedResult<LinkRow>>(`/api/crawl/${crawlId}/links?${q.toString()}`)
+        .then((res) => live && setData(res))
+        .catch(() => live && setData(null));
     }
-
-    const q = new URLSearchParams({ kind, page: String(page), pageSize: String(pageSize) });
-    if (search) q.set("search", search);
-    api<PagedResult<LinkRow>>(`/api/crawl/${crawlId}/links?${q.toString()}`)
-      .then(setData)
-      .catch(() => setData(null));
+    return () => {
+      live = false;
+    };
   }, [crawlId, kind, search, page]);
 
   const tabs: { id: Kind; label: string }[] = [
@@ -155,7 +156,7 @@ export default function Links({ crawlId }: { crawlId: string }) {
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-faint uppercase text-[10px] tracking-wide font-semibold">Target Page:</span>
                           <a
-                            href={opp.targetUrl}
+                            href={safeHref(opp.targetUrl)}
                             target="_blank"
                             rel="noreferrer"
                             className="font-semibold text-indigo-400 hover:text-indigo-300"
@@ -196,7 +197,7 @@ export default function Links({ crawlId }: { crawlId: string }) {
                     <div className="bg-panel2 p-3 rounded-lg border border-border text-xs leading-relaxed text-zinc-300 font-sans">
                       <span className="text-faint font-mono text-[10px] uppercase block mb-1">Sentence Context:</span>
                       <span>
-                        {opp.contextSnippet.split(new RegExp(`(${opp.keyword})`, "i")).map((chunk, cIdx) =>
+                        {opp.contextSnippet.split(new RegExp(`(${opp.keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "i")).map((chunk, cIdx) =>
                           chunk.toLowerCase() === opp.keyword.toLowerCase() ? (
                             <mark
                               key={cIdx}
@@ -381,7 +382,7 @@ export default function Links({ crawlId }: { crawlId: string }) {
                         <td className="p-3 max-w-[220px] truncate text-xs text-zinc-400">{l.source}</td>
                         <td className="p-3 max-w-[260px] truncate">
                           <a
-                            href={l.target}
+                            href={safeHref(l.target)}
                             target="_blank"
                             rel="noreferrer"
                             className="text-sky-400 hover:text-sky-300 text-xs transition-colors"

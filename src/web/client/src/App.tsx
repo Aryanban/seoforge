@@ -158,10 +158,13 @@ export default function App() {
       refreshCrawls();
       setTimeout(() => setPct(0), 1500);
     });
-    es.addEventListener("error", () => {
+    es.addEventListener("error", (ev: any) => {
+      // A transient network drop (no data, stream still CONNECTING) is retried by
+      // EventSource itself; keep the crawl marked as running meanwhile.
+      if (!ev?.data && es.readyState !== EventSource.CLOSED) return;
       es.close();
       setRunning(false);
-      setProgress("");
+      setProgress(ev?.data ? `Crawl failed: ${(() => { try { return JSON.parse(ev.data).message ?? JSON.parse(ev.data).error; } catch { return "unknown error"; } })()}` : "");
       setPct(0);
     });
   };

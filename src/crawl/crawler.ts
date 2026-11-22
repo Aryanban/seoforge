@@ -681,9 +681,10 @@ export class Crawler extends EventEmitter {
 
     const raw = await fetchPage(url, { timeoutMs: opts.timeoutMs, method: "GET" });
 
-    // If reach is explicitly enabled, or if standard fetch failed with 403/429 anti-bot,
-    // attempt scraping via Agent Reach engine
-    if (opts.reach || (opts.reach !== false && (raw.status === 403 || raw.status === 429))) {
+    // Agent Reach when enabled, or as a fallback for a 403 bot block (a no-op when the
+    // agent-reach binary is absent; availability is cached). Not for 429: that is the
+    // server asking us to slow down, which the AIMD scheduler must see, not bypass.
+    if (opts.reach || raw.status === 403) {
       try {
         const reachAvailable = await isAgentReachAvailable();
         if (reachAvailable) {

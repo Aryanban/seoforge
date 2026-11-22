@@ -159,7 +159,8 @@ export function mergeCrawlOptions(
     checkExternalLinks:
       domain.checkExternalLinks ?? config.crawl?.checkExternalLinks ?? DEFAULT_CRAWL_OPTIONS.checkExternalLinks,
     excludePatterns: domain.excludePatterns ?? config.crawl?.excludePatterns ?? [],
-    ...overrides,
+    // Only overrides that are actually set: { maxDepth: undefined } must not erase the config value.
+    ...Object.fromEntries(Object.entries(overrides ?? {}).filter(([, v]) => v !== undefined)),
   };
   return merged;
 }
