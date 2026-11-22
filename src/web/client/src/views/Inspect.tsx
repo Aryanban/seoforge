@@ -194,7 +194,7 @@ function OverviewTab({ result }: { result: InspectResult }) {
         <Card className="p-5">
           <h2 className="text-sm font-semibold mb-3">Core Web Vitals</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Vital label="LCP" value={v.lcp} unit="s" good={1.2} needs={2.4} />
+            <Vital label="LCP" value={v.lcp} unit="s" good={2.5} needs={4} />
             <Vital label="INP" value={v.inp} unit="ms" good={200} needs={500} />
             <Vital label="CLS" value={v.cls} unit="" good={0.1} needs={0.25} />
             <Vital label="FCP" value={v.fcp} unit="s" good={1.8} needs={3} />
@@ -931,8 +931,9 @@ function Vital({
         <div className="text-sm text-muted mt-1">n/a</div>
       </div>
     );
-  const ok = value <= good;
-  const mid = value <= needs;
+  const shown = unit === "s" ? value / 1000 : value;
+  const ok = shown <= good;
+  const mid = shown <= needs;
   const color = ok ? "text-emerald-400" : mid ? "text-amber-400" : "text-red-400";
   return (
     <div className="bg-panel2 border border-border rounded-lg p-3">

@@ -15,7 +15,7 @@ import {
 } from "../types.js";
 import { ExtractedLinks } from "../crawl/link-extractor.js";
 import { RobotsCheckResult } from "../crawl/robots.js";
-import { countWords, extractVisibleText } from "../crawl/link-extractor.js";
+import { countWords, extractMainText } from "../crawl/link-extractor.js";
 import { validateSchemaOrg } from "./schema-engine.js";
 import { evaluateAeo } from "./aeo-engine.js";
 import { metaChecks } from "./meta.js";
@@ -32,6 +32,9 @@ import { aeoChecks } from "./aeo.js";
 import { documentChecks } from "./document.js";
 import { urlChecks } from "./url.js";
 import { accessibilityChecks } from "./accessibility.js";
+import { languageChecks } from "./language.js";
+import { headIntegrityChecks } from "./head-integrity.js";
+import { jsRenderingIssues } from "./js-rendering.js";
 
 export type { Thresholds } from "../types.js";
 import type { Thresholds } from "../types.js";
@@ -107,6 +110,10 @@ export interface PageCheckContext {
   /** First-hop HTTP status that produced the redirect (301/302/307/308). */
   redirectStatusCode?: number;
   isHttpToHttpsRedirect: boolean;
+  /** Raw server HTML when `html` is the rendered DOM (render mode), for JS diffing. */
+  rawHtml?: string;
+  /** axe-core violations from render mode. */
+  axe?: import("../crawl/renderer.js").AxeViolation[];
 }
 
 export interface CheckOutput {
@@ -165,7 +172,16 @@ export function extractPageMeta(
 
   const canonical = $('link[rel="canonical"]').attr("href")?.trim();
   const normRequested = normalizeForCompare(finalUrl || pageUrl);
-  const normCanonical = canonical ? normalizeForCompare(canonical) : undefined;
+  // Google resolves a relative canonical against the page URL; compare the resolved form.
+  let resolvedCanonical = canonical;
+  if (canonical) {
+    try {
+      resolvedCanonical = new URL(canonical, finalUrl || pageUrl).href;
+    } catch {
+      /* keep as written */
+    }
+  }
+  const normCanonical = resolvedCanonical ? normalizeForCompare(resolvedCanonical) : undefined;
   let canonicalMatches = false;
   let isSpaCanonicalValid = false;
 
@@ -174,7 +190,7 @@ export function extractPageMeta(
     if (!canonicalMatches && canonicalPolicy === "spa") {
       try {
         const pu = new URL(finalUrl || pageUrl);
-        const pc = new URL(canonical);
+        const pc = new URL(resolvedCanonical!);
         if (pu.origin === pc.origin && pc.pathname === "/") {
           canonicalMatches = true;
           isSpaCanonicalValid = true;
@@ -217,10 +233,14 @@ export function extractPageMeta(
   const twitterDesc = $('meta[name="twitter:description"]').attr("content")?.trim();
   const twitterImage = $('meta[name="twitter:image"]').attr("content")?.trim();
 
-  const robotsMeta = $('meta[name="robots"]').attr("content")?.toLowerCase() || "";
-  const robotsNoindex = robotsMeta.includes("noindex");
-  const xRobots = (headers["x-robots-tag"] || "").toLowerCase();
-  const xRobotsNoindex = xRobots.includes("noindex");
+  // Google combines every robots/googlebot meta tag; the name attribute is case-insensitive.
+  const robotsMeta = $("meta[name]")
+    .filter((_, el) => /^(robots|googlebot)$/i.test($(el).attr("name") || ""))
+    .map((_, el) => $(el).attr("content") || "")
+    .get()
+    .join(",");
+  const robotsNoindex = hasNoindex(robotsMeta);
+  const xRobotsNoindex = xRobotsHasNoindex(headers["x-robots-tag"] || "");
 
   const schema = validateSchemaOrg($, expectedEntities);
   const aeo = evaluateAeo($, html);
@@ -241,7 +261,7 @@ export function extractPageMeta(
     h1Text,
     h2Count: $("h2").length,
     h1InNoscriptOnly,
-    wordCount: countWords(extractVisibleText($)),
+    wordCount: countWords(extractMainText($)),
     hreflang,
     openGraph: {
       title: ogTitle,
@@ -267,6 +287,37 @@ export function extractPageMeta(
   };
 }
 
+/** `noindex` or `none` (= noindex, nofollow) in a directive list. */
+export function hasNoindex(directives: string): boolean {
+  return directives
+    .toLowerCase()
+    .split(/[,\s]+/)
+    .some((d) => d === "noindex" || d === "none");
+}
+
+/** Directives whose own syntax contains a colon (not a user-agent scope). */
+const VALUED_DIRECTIVES = new Set(["max-snippet", "max-image-preview", "max-video-preview", "unavailable_after"]);
+
+/**
+ * X-Robots-Tag noindex as it applies to Google. A `<agent>:` prefix scopes the
+ * directives after it to that crawler, so "bingbot: noindex" leaves the page
+ * indexable in Google, while unscoped or "googlebot:" noindex does not.
+ * https://developers.google.com/search/docs/crawling-indexing/robots-meta-tag#xrobotstag
+ */
+export function xRobotsHasNoindex(header: string): boolean {
+  let scope = "";
+  for (const raw of header.toLowerCase().split(",")) {
+    let token = raw.trim();
+    const m = /^([a-z0-9_-]+)\s*:\s*(.*)$/.exec(token);
+    if (m && !VALUED_DIRECTIVES.has(m[1])) {
+      scope = m[1];
+      token = m[2];
+    }
+    if ((scope === "" || scope === "googlebot") && hasNoindex(token)) return true;
+  }
+  return false;
+}
+
 /* ------------------------------------------------------------------ */
 /* Check orchestration                                                 */
 /* ------------------------------------------------------------------ */
@@ -285,14 +336,23 @@ registerCheck("url", urlChecks);
 registerCheck("accessibility", accessibilityChecks);
 registerCheck("schema", schemaChecks);
 registerCheck("aeo", aeoChecks);
+registerCheck("language", languageChecks);
+registerCheck("head-integrity", headIntegrityChecks);
+registerCheck("js-rendering", (ctx) => ({
+  issues: ctx.rendered && ctx.rawHtml && ctx.$ && ctx.status === 200 ? jsRenderingIssues(ctx.rawHtml, ctx.$, ctx.pageUrl) : [],
+}));
 
 export interface PageCheckResult {
   page: import("../types.js").PageAuditResult;
   issues: AuditIssue[];
 }
 
+/** Checks that apply to any response; everything else needs a 2xx document (Screaming Frog audits content on 200s only). */
+const STATUS_ONLY_CHECKS = new Set(["status-indexability", "url"]);
+
 export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckResult {
-  const hasHtml = ctx.html && ctx.html.length > 0;
+  const isDocument = ctx.status >= 200 && ctx.status < 300;
+  const hasHtml = isDocument && ctx.html && ctx.html.length > 0;
   const meta = hasHtml
     ? extractPageMeta(
         ctx.$ ?? ctx.html,
@@ -309,6 +369,7 @@ export function runPageChecks(ctx: Omit<PageCheckContext, "meta">): PageCheckRes
 
   const issues: AuditIssue[] = [];
   for (const check of REGISTERED_CHECKS) {
+    if (!isDocument && !STATUS_ONLY_CHECKS.has(check.name)) continue;
     try {
       const out = check.run(fullCtx);
       issues.push(...out.issues);

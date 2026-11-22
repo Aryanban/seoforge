@@ -504,6 +504,12 @@ export function forecastCrawlTrend(
     throw new Error(`No completed crawl history found for '${targetUrl}'. Run at least one crawl first.`);
   }
 
+  const known = ["aeo", "errors", "warnings", "notices", "urls"];
+  metric = String(metric).toLowerCase() as CrawlMetricName;
+  if (!known.includes(metric)) {
+    throw new Error(`Unknown metric '${metric}'. Use one of: ${known.join(", ")}.`);
+  }
+
   const dataPoints: DataPoint[] = trendHistory.map((row) => {
     let val = 0;
     if (metric === "aeo") val = row.aeo;
@@ -526,13 +532,15 @@ export function forecastCrawlTrend(
     urls: "Total Crawled URLs",
   };
 
+  // Caller options first, then defaults for anything left undefined (an explicit
+  // `freq: undefined` must not erase the per-crawl default).
   const resolvedOpts: TimesFmOptions = {
+    ...options,
     freq: options.freq ?? "crawl",
     horizon: options.horizon ?? 7,
     metricName: options.metricName ?? metricLabels[metric],
     minVal: metric === "aeo" ? 0 : 0,
-    maxVal: metric === "aeo" ? 100 : undefined,
-    ...options,
+    maxVal: options.maxVal ?? (metric === "aeo" ? 100 : undefined),
   };
 
   return timesfmForecast(dataPoints, resolvedOpts);

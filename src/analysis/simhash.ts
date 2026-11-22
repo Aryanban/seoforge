@@ -24,7 +24,9 @@ function fnv1a64(str: string): bigint {
 export function computeSimHash(text: string): bigint {
   const tokens = text
     .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
+    // Unicode letters/digits: an ASCII-only \w erased Arabic/CJK/Cyrillic text, so all
+    // such pages hashed to 0n and matched each other as duplicates.
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .split(/\s+/)
     .filter((t) => t.length > 2);
 

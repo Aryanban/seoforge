@@ -1,24 +1,18 @@
-import React, { useEffect, useState } from "react";
-import { api, RecommendationRow, priorityClass } from "../lib/api.js";
-import { Card, Badge, Spinner, EmptyState, Tabs } from "../components/ui.js";
+import React, { useState } from "react";
+import { useApi, RecommendationRow, priorityClass } from "../lib/api.js";
+import { Card, Badge, Spinner, EmptyState, ErrorState, Tabs } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 import Markdown from "../components/Markdown.js";
 
 type Priority = "all" | "Critical" | "High" | "Medium" | "Low";
 
 export default function Recommendations({ crawlId }: { crawlId: string }) {
-  const [recs, setRecs] = useState<RecommendationRow[] | null>(null);
+  const { data: recs, error } = useApi<RecommendationRow[]>(`/api/crawl/${crawlId}/recommendations`);
   const [filter, setFilter] = useState<Priority>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  useEffect(() => {
-    api<RecommendationRow[]>(`/api/crawl/${crawlId}/recommendations`)
-      .then(setRecs)
-      .catch(() => setRecs([]));
-  }, [crawlId]);
-
-  if (!recs) return <Spinner label="Loading recommendations…" />;
+  if (!recs) return error ? <ErrorState message={error} /> : <Spinner label="Loading recommendations…" />;
 
   const counts = {
     Critical: recs.filter((r) => r.priority === "Critical").length,
@@ -60,8 +54,17 @@ export default function Recommendations({ crawlId }: { crawlId: string }) {
           {filtered.map((rec) => (
             <Card key={rec.id} hover className="overflow-hidden">
               <div
-                className="p-4 flex items-center gap-3 cursor-pointer hover:bg-panel2/40 transition-colors"
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded === rec.id}
+                className="p-4 flex items-center gap-3 cursor-pointer hover:bg-panel2/40 transition-colors focus-visible:outline-2 focus-visible:outline-indigo-400"
                 onClick={() => setExpanded(expanded === rec.id ? null : rec.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setExpanded(expanded === rec.id ? null : rec.id);
+                  }
+                }}
               >
                 <Badge className={priorityClass(rec.priority)}>{rec.priority}</Badge>
                 <span className="flex-1 font-medium text-sm text-zinc-200 truncate">{rec.name}</span>

@@ -49,14 +49,14 @@ import {
   type SavedSearch,
   type SearchQuery,
 } from "../discovery/index.js";
-import { loadConfig, mergeCrawlOptions } from "../config.js";
+import { loadConfig, mergeCrawlOptions, validateConfig } from "../config.js";
 import { compareCrawls, formatCrawlDiffMarkdown } from "../analysis/crawl-diff.js";
 import { analyzeLogs } from "../analysis/log-parser.js";
 import { detectCannibalization } from "../analysis/cannibalization.js";
 import { extractCustomFields, CustomExtractorRule } from "../analysis/custom-extractor.js";
-import { analyzeLinkIntersect, formatLinkIntersectMarkdown } from "../analysis/link-intersect.js";
-import { analyzeContentGap, formatContentGapMarkdown } from "../analysis/content-gap.js";
-import { testRobotsPath, auditRobotsAiCompliance, formatRobotsAuditMarkdown } from "../analysis/robots-simulator.js";
+import { analyzeLinkIntersect } from "../analysis/link-intersect.js";
+import { analyzeContentGap } from "../analysis/content-gap.js";
+import { testRobotsPath, auditRobotsAiCompliance } from "../analysis/robots-simulator.js";
 import { analyzeRedirectChain, generateDirectRedirectCode } from "../analysis/redirect-tracer.js";
 import { analyzePageSpeedLab } from "../analysis/pagespeed-lab.js";
 import { scoreContent } from "../analysis/live-content-scorer.js";
@@ -86,12 +86,30 @@ import {
   formatTimesfmMarkdown,
 } from "../forecasting/index.js";
 
+/** Sent to MCP clients on connect: how to drive SEOForge end to end without guessing. */
+const AGENT_INSTRUCTIONS = `SEOForge is a local technical-SEO crawler and audit engine. Everything runs on this machine; results persist in reports/seoforge.db, so crawls from earlier sessions stay readable.
+
+Typical autonomous loop:
+1. Orient: seoforge_list_crawls (past crawls and running ones), seoforge_get_config (configured domains).
+2. Crawl: seoforge_crawl {url}. For more than ~200 pages pass async_mode: true, then poll seoforge_crawl_status (pages crawled so far) every few seconds; seoforge_stop_crawl ends early and keeps partial results.
+3. Triage: seoforge_crawl_overview (health score, status/indexability/depth distributions, top issues, trend), then seoforge_get_issues (grouped by severity) and seoforge_issue_urls (every URL for one issue).
+4. Drill down: seoforge_list_pages (filter/sort pages: broken, non-indexable, orphan, slow, low AEO), seoforge_get_page (one page's full audit, each issue with id and details), seoforge_link_report, seoforge_sitemap_report.
+5. Fix: seoforge_get_recommendations (fix steps per issue), seoforge_patch_codebase (apply title/meta/canonical/schema/alt fixes to source), seoforge_generate_schema, seoforge_generate_aeo_snippet.
+6. Verify: re-crawl, then seoforge_crawl_diff {baseline, target} for regressions; seoforge_ci_gate for pass/fail.
+7. Publish: seoforge_submit_indexnow for changed URLs.
+
+crawl_id is optional on read tools and defaults to the most recent crawl. Single-URL checks need no crawl: seoforge_inspect_url, seoforge_robots_test, seoforge_trace_redirects, seoforge_pagespeed_lab, seoforge_check_llms_txt. Market and off-site work: seoforge_compare_competitors, seoforge_link_intersect, seoforge_content_gap, seoforge_keyword_intelligence, seoforge_reputation_report, seoforge_discover_sources, seoforge_publishing_plan, seoforge_forecast. Errors come back as {"error": "..."} with a hint about what to call instead.
+
+Only crawl sites the user owns or is authorised to audit; keep the default politeness limits on third-party sites.`;
+
 interface AsyncJob {
   crawlId: string;
   crawler: Crawler;
   targetUrl: string;
   result?: CrawlResult;
   error?: string;
+  /** Latest progress event, so status polls can report pages crawled so far. */
+  progress?: any;
 }
 const asyncJobs = new Map<string, AsyncJob>();
 
@@ -120,7 +138,7 @@ function summarizeForAgent(result: CrawlResult) {
 export function createMcpServer(): Server {
   const server = new Server(
     { name: "seoforge", version: "2.0.0" },
-    { capabilities: { tools: {} } }
+    { capabilities: { tools: {} }, instructions: AGENT_INSTRUCTIONS }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -142,16 +160,92 @@ export function createMcpServer(): Server {
             strategy: { type: "string", enum: ["discover", "sitemap", "config"], description: "'discover' BFS from root; 'sitemap' seed from sitemap URLs; 'config' use configured paths." },
             async_mode: { type: "boolean", description: "Return a crawlId immediately and poll with seoforge_crawl_status (recommended for large sites)." },
             save_report: { type: "boolean", description: "Write the markdown report to reports/ (default true)." },
+            exclude_patterns: { type: "array", items: { type: "string" }, description: "Regexes (or substrings) of URLs never to crawl, e.g. ['/tag/', '\\?sort=']." },
+            max_requests_per_second: { type: "number", description: "Politeness cap on requests/second to the site (default 20; 0 = uncapped, only for sites you own)." },
+            respect_robots: { type: "boolean", description: "Obey robots.txt disallow rules (default true)." },
+            check_external_links: { type: "boolean", description: "Verify outbound links for 4xx/5xx (default true; false is faster)." },
+            sitemap_url: { type: "string", description: "Use this sitemap instead of auto-discovering one." },
+            timeout_ms: { type: "number", description: "Per-request timeout (default 15000)." },
           },
         },
       },
       {
         name: "seoforge_crawl_status",
-        description: "Poll the status of an asynchronous crawl started with seoforge_crawl (async_mode: true).",
+        description: "Status of a crawl. For a running async crawl: pages crawled/discovered so far, pages per second and the current URL. For a finished or stored crawl: its summary (errors, warnings, health, AEO score).",
         inputSchema: {
           type: "object",
-          properties: { crawl_id: { type: "string", description: "Crawl ID returned by seoforge_crawl" } },
-          required: ["crawl_id"],
+          properties: { crawl_id: { type: "string", description: "Crawl ID returned by seoforge_crawl or seoforge_list_crawls (default: most recent)." } },
+          required: [],
+        },
+      },
+      {
+        name: "seoforge_stop_crawl",
+        description: "Stop a running async crawl. Pages fetched so far are still audited and saved, so the partial crawl can be read with the other tools.",
+        inputSchema: { type: "object", properties: { crawl_id: { type: "string" } }, required: ["crawl_id"] },
+      },
+      {
+        name: "seoforge_list_crawls",
+        description: "List stored crawls, newest first: id, target URL, status, date, pages crawled, errors/warnings/notices, AEO score. Start here to find crawl IDs from earlier sessions.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            target_url: { type: "string", description: "Only crawls of this exact root URL." },
+            limit: { type: "number", description: "Max crawls (default 20, max 200)." },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "seoforge_crawl_overview",
+        description: "Dashboard overview of a crawl in one call: health score, HTTP status distribution, indexability, crawl depth histogram, response-time buckets, top issues, and the health trend across earlier crawls of the same site.",
+        inputSchema: { type: "object", properties: { crawl_id: { type: "string", description: "Crawl ID (default: the most recent crawl)." } }, required: [] },
+      },
+      {
+        name: "seoforge_list_pages",
+        description: "Query crawled pages with filters and sorting (like the dashboard Pages table). Each row has status, depth, title, word count, links in/out, AEO score, internal link score, indexability, and its issues. Use it to find e.g. all non-indexable pages, 4xx pages, orphans, or the slowest pages.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID (default: the most recent crawl)." },
+            status: { type: "string", enum: ["all", "ok", "2xx", "redirect", "broken"], description: "ok = 200, broken = 4xx/5xx." },
+            indexable: { type: "boolean" },
+            orphan: { type: "boolean", description: "Only pages with no incoming internal links." },
+            depth: { type: "number", description: "Exact crawl depth." },
+            min_aeo: { type: "number", description: "Minimum AEO score." },
+            search: { type: "string", description: "Substring of URL or title." },
+            sort: { type: "string", enum: ["url", "status", "depth", "responseTimeMs", "wordCount", "incomingLinks", "outgoingLinks", "aeoScore", "internalLinkScore", "title"] },
+            dir: { type: "string", enum: ["asc", "desc"] },
+            page: { type: "number", description: "1-based page number (default 1)." },
+            page_size: { type: "number", description: "Rows per page (default 50, max 500)." },
+          },
+          required: [],
+        },
+      },
+      {
+        name: "seoforge_issue_urls",
+        description: "Every URL affected by one issue (seoforge_get_issues only samples 25). Pass the issue name exactly as seoforge_get_issues returns it.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            crawl_id: { type: "string", description: "Crawl ID (default: the most recent crawl)." },
+            issue: { type: "string", description: "Issue name, e.g. 'Broken internal link'." },
+            limit: { type: "number", description: "Max URLs (default 500, max 10000)." },
+          },
+          required: ["issue"],
+        },
+      },
+      {
+        name: "seoforge_get_config",
+        description: "Read seoforge.config.json (configured domains, crawl defaults, thresholds, IndexNow key) from the working directory.",
+        inputSchema: { type: "object", properties: {}, required: [] },
+      },
+      {
+        name: "seoforge_update_config",
+        description: "Validate and write seoforge.config.json. Pass the complete config object (read it first with seoforge_get_config and modify it). Invalid configs are rejected with the reason and nothing is written.",
+        inputSchema: {
+          type: "object",
+          properties: { config: { type: "object", description: "The full config object." } },
+          required: ["config"],
         },
       },
       {
@@ -164,7 +258,7 @@ export function createMcpServer(): Server {
             severity: { type: "string", enum: ["Error", "Warning", "Notice"] },
             limit: { type: "number", description: "Max issue groups to return (default 50)." },
           },
-          required: ["crawl_id"],
+          required: [],
         },
       },
       {
@@ -176,7 +270,7 @@ export function createMcpServer(): Server {
             crawl_id: { type: "string" },
             priority: { type: "string", enum: ["Critical", "High", "Medium", "Low"] },
           },
-          required: ["crawl_id"],
+          required: [],
         },
       },
       {
@@ -198,13 +292,13 @@ export function createMcpServer(): Server {
             kind: { type: "string", enum: ["broken", "internal", "external", "redirects"], description: "Filter the link set (default: broken)." },
             limit: { type: "number", description: "Max rows (default 50)." },
           },
-          required: ["crawl_id"],
+          required: [],
         },
       },
       {
         name: "seoforge_sitemap_report",
         description: "Read the XML sitemap report: accessibility, URL count, and URLs listed in the sitemap that have no internal links (orphan-in-sitemap).",
-        inputSchema: { type: "object", properties: { crawl_id: { type: "string" } }, required: ["crawl_id"] },
+        inputSchema: { type: "object", properties: { crawl_id: { type: "string" } }, required: [] },
       },
       {
         name: "seoforge_export_report",
@@ -216,7 +310,7 @@ export function createMcpServer(): Server {
             format: { type: "string", enum: ["md", "csv", "html"], description: "Export format (default md)." },
             csv_kind: { type: "string", enum: ["pages", "issues", "links", "recommendations"] },
           },
-          required: ["crawl_id"],
+          required: [],
         },
       },
       {
@@ -798,12 +892,25 @@ export function createMcpServer(): Server {
           };
         }
 
+        const extraOpts: Record<string, unknown> = {
+          excludePatterns: Array.isArray(args?.exclude_patterns) ? (args!.exclude_patterns as string[]).map(String) : undefined,
+          maxRequestsPerSecond: numArg(args?.max_requests_per_second),
+          respectRobots: typeof args?.respect_robots === "boolean" ? args.respect_robots : undefined,
+          checkExternalLinks: typeof args?.check_external_links === "boolean" ? args.check_external_links : undefined,
+          sitemapOverride: (args?.sitemap_url as string) || undefined,
+          timeoutMs: numArg(args?.timeout_ms),
+        };
+        for (const [k, v] of Object.entries(extraOpts)) if (v !== undefined) (crawlOpts as any)[k] = v;
+
         const crawlId = `crawl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
         const crawler = new Crawler(crawlId);
 
         if (args?.async_mode) {
           const job: AsyncJob = { crawlId, crawler, targetUrl };
           asyncJobs.set(crawlId, job);
+          crawler.on("progress", (p) => {
+            job.progress = p;
+          });
           crawler.crawl(targetUrl, crawlOpts).then(
             (result) => {
               const full: CrawlResult = { ...result, id: crawlId, project, domainName };
@@ -857,10 +964,27 @@ export function createMcpServer(): Server {
       if (name === "seoforge_crawl_status") {
         const crawlId = args?.crawl_id as string;
         const job = asyncJobs.get(crawlId);
-        if (!job) return err(`No async crawl with id '${crawlId}'.`);
+        if (!job) {
+          // Not started in this session (or a synchronous crawl): read it from the store.
+          const stored = await loadFullResult(crawlId);
+          if (!stored) return err(`No crawl with id '${crawlId}'. Use seoforge_list_crawls to find crawl IDs.`);
+          return ok({ ...summarizeForAgent(stored), issueGroups: stored.issuesSummary.length, recommendations: stored.recommendations.length });
+        }
         if (job.error) return err(`Crawl failed: ${job.error}`);
         if (!job.result) {
-          return ok({ crawlId, targetUrl: job.targetUrl, status: "running" });
+          const p = job.progress ?? {};
+          return ok({
+            crawlId,
+            targetUrl: job.targetUrl,
+            status: job.crawler.isStopped ? "stopping" : "running",
+            crawled: p.crawled ?? 0,
+            discovered: p.discovered ?? 0,
+            depth: p.depth ?? 0,
+            pagesPerSecond: p.pagesPerSecond ?? 0,
+            currentUrl: p.currentUrl,
+            message: p.message,
+            hint: "Poll again in a few seconds; seoforge_stop_crawl ends it early and keeps the pages crawled so far.",
+          });
         }
         const full = job.result;
         return ok({
@@ -872,9 +996,112 @@ export function createMcpServer(): Server {
       }
 
       /* ------------------------------------------------------------ */
+      if (name === "seoforge_stop_crawl") {
+        const job = asyncJobs.get(args?.crawl_id as string);
+        if (!job) return err(`No running async crawl with id '${args?.crawl_id}' in this session.`);
+        if (job.result) return ok({ crawlId: job.crawlId, status: job.result.status, message: "Crawl already finished." });
+        job.crawler.stop();
+        return ok({ crawlId: job.crawlId, status: "stopping", message: "Finishing in-flight pages; poll seoforge_crawl_status until it reports 'stopped'." });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_list_crawls") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const limit = Math.min(200, Math.max(1, numArg(args?.limit) ?? 20));
+        const crawls = repo.listCrawls(db, limit, (args?.target_url as string) || undefined);
+        const running = [...asyncJobs.values()].filter((j) => !j.result && !j.error);
+        return ok({
+          running: running.map((j) => ({ crawlId: j.crawlId, targetUrl: j.targetUrl, crawled: j.progress?.crawled ?? 0 })),
+          crawls: crawls.map((c) => ({
+            crawlId: c.id,
+            targetUrl: c.targetUrl,
+            status: c.status,
+            startedAt: c.startedAt,
+            pagesCrawled: c.totalUrlsCrawled,
+            errors: c.totalErrors,
+            warnings: c.totalWarnings,
+            notices: c.totalNotices,
+            averageAeoScore: c.averageAeoScore,
+            passed: c.passed,
+          })),
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_crawl_overview") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const crawlId = (args?.crawl_id as string) || repo.listCrawls(db, 1)[0]?.id;
+        const crawl = crawlId ? repo.getCrawl(db, crawlId) : null;
+        if (!crawl) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs.");
+        const top = repo.getIssues(db, crawlId!, { pageSize: 15 });
+        return ok({
+          ...summarizeForAgent(crawl),
+          stats: repo.getCrawlStats(db, crawlId!),
+          topIssues: top.rows.map((i: any) => ({ issue: i.name, severity: i.severity, category: i.category, affectedPages: i.affectedPages })),
+          trend: repo.getTrend(db, crawl.targetUrl, 30),
+        });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_list_pages") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const crawlId = (args?.crawl_id as string) || repo.listCrawls(db, 1)[0]?.id;
+        if (!crawlId) return err("No crawls stored yet. Run seoforge_crawl first.");
+        const pageSize = Math.min(500, numArg(args?.page_size) ?? 50);
+        const res = repo.getPageRows(db, crawlId, {
+          status: args?.status as string | undefined,
+          indexable: args?.indexable as boolean | undefined,
+          isOrphan: args?.orphan as boolean | undefined,
+          depth: numArg(args?.depth),
+          minAeo: numArg(args?.min_aeo),
+          search: args?.search as string | undefined,
+          sort: args?.sort as string | undefined,
+          dir: args?.dir === "desc" ? "desc" : "asc",
+          page: numArg(args?.page),
+          pageSize,
+        });
+        const page = numArg(args?.page) ?? 1;
+        return ok({ crawlId, total: res.total, page, pageSize, hasMore: page * pageSize < res.total, pages: res.rows });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_issue_urls") {
+        const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
+        const crawlId = (args?.crawl_id as string) || repo.listCrawls(db, 1)[0]?.id;
+        if (!crawlId) return err("No crawls stored yet. Run seoforge_crawl first.");
+        const issue = String(args?.issue ?? "");
+        const limit = Math.min(10_000, Math.max(1, numArg(args?.limit) ?? 500));
+        const urls = repo.getIssueUrls(db, crawlId, issue, limit);
+        if (urls.length === 0) return err(`No URLs for issue '${issue}' in ${crawlId}. Use the exact name from seoforge_get_issues.`);
+        return ok({ crawlId, issue, count: urls.length, urls });
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_get_config") {
+        try {
+          return ok(await loadConfig());
+        } catch (e: any) {
+          return err(`No usable seoforge.config.json in ${process.cwd()}: ${e?.message ?? e}`);
+        }
+      }
+
+      /* ------------------------------------------------------------ */
+      if (name === "seoforge_update_config") {
+        let valid;
+        try {
+          valid = validateConfig(args?.config);
+        } catch (e: any) {
+          return err(`Config rejected, nothing written: ${e?.message ?? e}`);
+        }
+        const file = path.join(process.cwd(), "seoforge.config.json");
+        await fs.writeFile(file, JSON.stringify(args?.config, null, 2), "utf-8");
+        return ok({ saved: file, domains: valid.domains.map((d) => d.url) });
+      }
+
+      /* ------------------------------------------------------------ */
       if (name === "seoforge_get_issues") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
         const severity = args?.severity as string | undefined;
         let issues = result.issuesSummary;
         if (severity) issues = issues.filter((i) => i.severity === severity);
@@ -898,7 +1125,7 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_get_recommendations") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
         const priority = args?.priority as string | undefined;
         let recs = result.recommendations;
         if (priority) recs = recs.filter((r) => r.priority === priority);
@@ -923,10 +1150,11 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_get_page") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
-        const url = (args?.url as string).toLowerCase();
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
+        if (!args?.url) return err("Pass url (a page URL from this crawl; seoforge_list_pages lists them).");
+        const url = String(args.url).toLowerCase();
         const page = result.pages.find((p) => p.url.toLowerCase() === url || p.normalizedUrl === url);
-        if (!page) return err("Page not found in this crawl.");
+        if (!page) return err("Page not found in this crawl. Use seoforge_list_pages with search to find its exact URL.");
         return ok({
           url: page.url,
           status: page.status,
@@ -949,14 +1177,29 @@ export function createMcpServer(): Server {
           schemaTypes: page.schema.typesFound,
           schemaErrors: [...page.schema.schemaOrgErrors, ...page.schema.googleRichResultsErrors],
           coreWebVitals: page.cwv,
-          issues: page.auditIssues.map((i) => ({ severity: i.severity, category: i.category, issue: i.name, message: i.message })),
+          finalUrl: page.finalUrl,
+          responseTimeMs: page.responseTimeMs,
+          ttfbMs: (page as any).ttfbMs,
+          contentLengthBytes: (page as any).contentLengthBytes,
+          redirectChain: (page as any).redirectChain,
+          blockedByRobots: page.blockedByRobots,
+          hreflang: page.hreflang,
+          openGraph: page.openGraph,
+          images: {
+            total: page.images.length,
+            missingAlt: page.images.filter((i) => i.alt === undefined).length,
+            missingDimensions: page.images.filter((i) => !i.hasDimensions).length,
+          },
+          incomingFrom: page.incomingInternalLinks.slice(0, 50),
+          // id + details say exactly what to fix (e.g. which link target is broken).
+          issues: page.auditIssues.map((i) => ({ id: i.id, severity: i.severity, category: i.category, issue: i.name, message: i.message, details: i.details })),
         });
       }
 
       /* ------------------------------------------------------------ */
       if (name === "seoforge_link_report") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
         const kind = (args?.kind as string) || "broken";
         const limit = numArg(args?.limit) ?? 50;
         let links = result.links;
@@ -989,7 +1232,7 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_sitemap_report") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
         const orphanInSitemap = result.pages.filter((p) =>
           p.auditIssues.some((i) => i.id === "orphan_in_sitemap")
         );
@@ -1009,7 +1252,7 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_export_report") {
         const result = await loadFullResult(args?.crawl_id as string);
-        if (!result) return err("Crawl not found.");
+        if (!result) return err("Crawl not found. Use seoforge_list_crawls to find crawl IDs, or omit crawl_id for the most recent crawl.");
         const format = (args?.format as string) || "md";
         const reportPath = await saveMarkdownReport(result).catch(() => "");
         if (format === "html") {
@@ -1021,7 +1264,10 @@ export function createMcpServer(): Server {
         }
         if (format === "csv") {
           const { toCsv } = await import("../report/csv.js");
-          const kind = (args?.csv_kind as any) || "pages";
+          // Whitelisted: the kind is part of the output filename (no ../ path traversal).
+          const kind = ["pages", "issues", "links", "recommendations"].includes(String(args?.csv_kind))
+            ? (args!.csv_kind as any)
+            : "pages";
           const out = path.join(process.cwd(), "reports", `crawl-${kind}-${new Date().toISOString().split("T")[0]}.csv`);
           await fs.mkdir(path.dirname(out), { recursive: true });
           await fs.writeFile(out, toCsv(result, kind), "utf-8");
@@ -1046,15 +1292,15 @@ export function createMcpServer(): Server {
       /* ------------------------------------------------------------ */
       if (name === "seoforge_analyze_content") {
         const url = args?.url as string | undefined;
-        let html = (args?.html as string) || "";
+        const html = (args?.html as string) || "";
+        const targetKeyword = args?.target_keyword as string | undefined;
         if (!html && url) {
-          const { page } = await auditSinglePage(url);
-          // If fetched, analyze HTML
+          // Fetch + analyze the live page (previously analyzed an empty string).
+          const { contentAnalysis } = await auditSinglePage(url, { targetKeyword });
+          if (!contentAnalysis) return err(`Could not fetch HTML from ${url}`);
+          return ok({ url, analysis: contentAnalysis });
         }
-        const analysis = analyzeContent(html, {
-          url,
-          targetKeyword: args?.target_keyword as string | undefined,
-        });
+        const analysis = analyzeContent(html, { url, targetKeyword });
         return ok({ url, analysis });
       }
 
@@ -1750,8 +1996,8 @@ export function createMcpServer(): Server {
       }
 
       return err(`Unknown tool '${name}'`);
-    } catch (err: any) {
-      return err(`Internal tool execution error: ${err.message}`);
+    } catch (e: any) {
+      return err(`Internal tool execution error: ${e?.message ?? e}`);
     }
   });
 
@@ -1767,7 +2013,9 @@ function err(message: string) {
   return { content: [{ type: "text", text: JSON.stringify({ error: message }) }], isError: true };
 }
 function numArg(v: any): number | undefined {
-  return typeof v === "number" ? v : v !== undefined ? Number(v) : undefined;
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function persist(result: CrawlResult): void {
@@ -1779,12 +2027,14 @@ function persist(result: CrawlResult): void {
   }
 }
 
-async function loadFullResult(crawlId: string): Promise<CrawlResult | null> {
-  const job = asyncJobs.get(crawlId);
+/** A crawl by id; with no id, the most recent crawl (so agents can omit crawl_id). */
+async function loadFullResult(crawlId?: string): Promise<CrawlResult | null> {
+  const job = crawlId ? asyncJobs.get(crawlId) : undefined;
   if (job?.result) return job.result;
   try {
     const db = openStore(path.join(process.cwd(), "reports", "seoforge.db"));
-    return repo.getFullCrawl(db, crawlId);
+    const id = crawlId || repo.listCrawls(db, 1)[0]?.id;
+    return id ? repo.getFullCrawl(db, id) : null;
   } catch {
     return null;
   }

@@ -90,7 +90,19 @@ export interface ContentAnalysisResult {
 /**
  * Counts syllables in an English word using phonetic heuristic rules.
  */
+const syllableCache = new Map<string, number>();
+
 export function countSyllables(word: string): number {
+  let n = syllableCache.get(word);
+  if (n === undefined) {
+    n = countSyllablesUncached(word);
+    if (syllableCache.size > 50_000) syllableCache.clear();
+    syllableCache.set(word, n);
+  }
+  return n;
+}
+
+function countSyllablesUncached(word: string): number {
   const w = word.toLowerCase().replace(/[^a-z]/g, "");
   if (!w) return 0;
   if (w.length <= 3) return 1;
@@ -174,27 +186,31 @@ export function calculateReadability(text: string): ReadabilityMetrics {
 /**
  * Extracts top n-grams from body text with stop word filtering and frequency calculation.
  */
-export function extractNgrams(text: string, n: number, minOccurrences: number = 2): KeywordNgram[] {
-  const cleanTokens = text
+function ngramTokens(text: string): string[] {
+  return text
     .toLowerCase()
     .replace(/[^\w\s-]/g, " ")
     .split(/\s+/)
-    .map((t) => t.trim())
     .filter((t) => t.length > 1 && !/^\d+$/.test(t));
+}
 
+export function extractNgrams(text: string, n: number, minOccurrences: number = 2): KeywordNgram[] {
+  return ngramsFromTokens(ngramTokens(text), n, minOccurrences);
+}
+
+function ngramsFromTokens(cleanTokens: string[], n: number, minOccurrences: number): KeywordNgram[] {
   const totalWords = cleanTokens.length;
   if (totalWords < n) return [];
 
   const counts = new Map<string, number>();
+  // Stop-word flags computed once; phrases built without per-position slices.
+  const stop = cleanTokens.map((w) => STOP_WORDS.has(w));
 
   for (let i = 0; i <= totalWords - n; i++) {
-    const slice = cleanTokens.slice(i, i + n);
-    // Ignore if all tokens are stop words
-    if (slice.every((w) => STOP_WORDS.has(w))) continue;
-    // For n > 1, don't start or end with a stop word
-    if (n > 1 && (STOP_WORDS.has(slice[0]) || STOP_WORDS.has(slice[slice.length - 1]))) continue;
-
-    const phrase = slice.join(" ");
+    // For n > 1, don't start or end with a stop word (this also covers "all stop words")
+    if (stop[i] || stop[i + n - 1]) continue;
+    const phrase =
+      n === 1 ? cleanTokens[i] : n === 2 ? cleanTokens[i] + " " + cleanTokens[i + 1] : cleanTokens.slice(i, i + n).join(" ");
     counts.set(phrase, (counts.get(phrase) || 0) + 1);
   }
 
@@ -337,9 +353,10 @@ export function analyzeContent(
   const readability = calculateReadability(bodyText);
 
   // N-grams
-  const unigrams = extractNgrams(bodyText, 1, 2);
-  const bigrams = extractNgrams(bodyText, 2, 2);
-  const trigrams = extractNgrams(bodyText, 3, 2);
+  const tokens = ngramTokens(bodyText);
+  const unigrams = ngramsFromTokens(tokens, 1, 2);
+  const bigrams = ngramsFromTokens(tokens, 2, 2);
+  const trigrams = ngramsFromTokens(tokens, 3, 2);
 
   // Heading outline
   const headingItems: HeadingItem[] = [];

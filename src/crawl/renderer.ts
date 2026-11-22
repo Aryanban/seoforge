@@ -5,13 +5,28 @@
  * render mode pay zero download/runtime cost. If the package is missing we
  * surface an actionable message rather than crashing the crawl.
  */
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { CoreWebVitals } from "../types.js";
+
+/** One failed axe-core rule on a rendered page. */
+export interface AxeViolation {
+  id: string;
+  impact: "minor" | "moderate" | "serious" | "critical" | null;
+  help: string;
+  helpUrl: string;
+  nodes: number;
+  /** CSS selectors of the first few failing elements. */
+  targets: string[];
+}
 
 export interface RenderResult {
   html: string;
   finalUrl: string;
   status: number;
   cwv?: CoreWebVitals;
+  /** axe-core WCAG 2.x A/AA violations, when options.axe is set and axe-core is installed. */
+  axe?: AxeViolation[];
   errorMessage?: string;
 }
 
@@ -19,7 +34,24 @@ export interface RenderOptions {
   timeoutMs?: number;
   waitUntil?: "load" | "domcontentloaded" | "networkidle";
   blockHeavyResources?: boolean;
+  /** Run axe-core in the rendered page. */
+  axe?: boolean;
 }
+
+let axeSource: string | null | undefined;
+/** axe-core's browser bundle, or null when the optional dependency is missing. */
+function loadAxeSource(): string | null {
+  if (axeSource === undefined) {
+    try {
+      axeSource = readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
+    } catch {
+      axeSource = null;
+    }
+  }
+  return axeSource;
+}
+
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
 const CWV_INIT_SCRIPT = `
 (() => {
@@ -30,15 +62,32 @@ const CWV_INIT_SCRIPT = `
       const entries = list.getEntries();
       if (entries.length) window.__seoforgeCwv.lcp = Math.round(entries[entries.length - 1].startTime);
     });
+    // CLS per web-vitals: largest session window (shifts < 1s apart, window <= 5s),
+    // not the lifetime sum.
+    let sessionValue = 0, sessionFirst = 0, sessionLast = 0;
     po('layout-shift', (list) => {
-      let cls = 0;
-      for (const e of list.getEntries()) if (!e.hadRecentInput) cls += e.value;
-      window.__seoforgeCwv.cls = Math.round(cls * 1000) / 1000;
+      for (const e of list.getEntries()) {
+        if (e.hadRecentInput) continue;
+        if (sessionValue && e.startTime - sessionLast < 1000 && e.startTime - sessionFirst < 5000) {
+          sessionValue += e.value;
+        } else {
+          sessionValue = e.value;
+          sessionFirst = e.startTime;
+        }
+        sessionLast = e.startTime;
+        const cls = Math.round(sessionValue * 1000) / 1000;
+        if (cls > window.__seoforgeCwv.cls) window.__seoforgeCwv.cls = cls;
+      }
     });
-    po('interaction', (list) => {
-      const entries = list.getEntries();
-      if (entries.length) window.__seoforgeCwv.inp = Math.round(entries[entries.length - 1].duration);
-    });
+    // INP comes from 'event' timing entries ('interaction' is not an entry type).
+    // A lab load has no user input, so this stays 0 unless the page is interacted with.
+    try {
+      new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.interactionId && e.duration > window.__seoforgeCwv.inp) window.__seoforgeCwv.inp = Math.round(e.duration);
+        }
+      }).observe({ type: 'event', buffered: true, durationThreshold: 40 });
+    } catch (e) { /* event timing unsupported */ }
     po('paint', (list) => {
       for (const e of list.getEntries()) if (e.name === 'first-contentful-paint') window.__seoforgeCwv.fcp = Math.round(e.startTime);
     });
@@ -111,11 +160,20 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     };
   }
 
-  const browser = await getSharedBrowser(chromium);
-  const context = await browser.newContext({
-    userAgent: "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)",
-    bypassCSP: true,
-  });
+  let context: any;
+  try {
+    const browser = await getSharedBrowser(chromium);
+    if (!browser.isConnected()) throw new Error("browser disconnected");
+    context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (compatible; SEOForgeBot/2.0; +https://github.com/Aryanban/seoforge)",
+      bypassCSP: true,
+    });
+  } catch (err: any) {
+    // Chromium crashed or failed to launch: drop it so the next page relaunches,
+    // and report this page as a render failure instead of throwing out of the crawl.
+    sharedBrowserPromise = null;
+    return { html: "", finalUrl: url, status: 0, errorMessage: `Render failed: ${err?.message ?? err}` };
+  }
 
   try {
     if (blockHeavyResources) {
@@ -130,12 +188,26 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
     await page.addInitScript(CWV_INIT_SCRIPT);
 
     const response = await page.goto(url, { timeout: timeoutMs, waitUntil });
+    // `load` can fire before the first paint, leaving FCP/LCP empty. Wait for an
+    // LCP entry (bounded), then two frames so pending paints and shifts land.
+    await page
+      .waitForFunction(() => (window as any).__seoforgeCwv?.lcp > 0, null, { timeout: 3000 })
+      .catch(() => {});
+    await page
+      .evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null)))))
+      .catch(() => {});
     const html = await page.content();
     const finalUrl = page.url();
 
     let cwv: CoreWebVitals | undefined;
     try {
-      const raw = await page.evaluate(() => (window as any).__seoforgeCwv);
+      const raw = await page.evaluate(() => {
+        const cwv = (window as any).__seoforgeCwv;
+        // TTFB per web-vitals: responseStart of the navigation entry (was never set).
+        const nav = performance.getEntriesByType("navigation")[0] as any;
+        if (cwv && nav) cwv.ttfb = Math.max(0, Math.round(nav.responseStart - (nav.activationStart || 0)));
+        return cwv;
+      });
       if (raw) {
         cwv = {
           lcp: raw.lcp || undefined,
@@ -151,11 +223,33 @@ export async function renderUrl(url: string, options: RenderOptions = {}): Promi
       /* non-fatal */
     }
 
+    let axe: AxeViolation[] | undefined;
+    const source = options.axe ? loadAxeSource() : null;
+    if (source) {
+      try {
+        await page.addScriptTag({ content: source });
+        axe = await page.evaluate(async (tags: string[]) => {
+          const res = await (window as any).axe.run(document, { runOnly: { type: "tag", values: tags }, resultTypes: ["violations"] });
+          return res.violations.map((v: any) => ({
+            id: v.id,
+            impact: v.impact ?? null,
+            help: v.help,
+            helpUrl: v.helpUrl,
+            nodes: v.nodes.length,
+            targets: v.nodes.slice(0, 5).map((n: any) => String(n.target?.[0] ?? "")),
+          }));
+        }, AXE_TAGS);
+      } catch {
+        /* axe failure (CSP, navigation) leaves the hand-written checks in place */
+      }
+    }
+
     return {
       html,
       finalUrl,
       status: response?.status() ?? 200,
       cwv,
+      axe,
     };
   } catch (err: any) {
     return {

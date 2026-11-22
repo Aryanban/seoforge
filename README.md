@@ -1,6 +1,6 @@
 # SEOForge 2.0
 
-> **The frontier open-source SEO crawler, AEO audit engine, TimesFM forecasting foundation, and 38-tool Model Context Protocol (MCP) server for autonomous AI coding agents.**
+> **The frontier open-source SEO crawler, AEO audit engine, TimesFM forecasting foundation, and 45-tool Model Context Protocol (MCP) server for autonomous AI coding agents.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
@@ -14,7 +14,7 @@
 
 ## ⚡ Overview
 
-SEOForge 2.0 is a **high-throughput, local-first technical SEO crawler and audit platform** built as a zero-cost, private alternative to Screaming Frog (£209/yr) and Ahrefs ($129/mo). It requires **no API keys, makes no external LLM calls**, and persists everything to a high-concurrency local SQLite store reachable via a modern React dashboard, a REST API, or a 38-tool Model Context Protocol (MCP) server.
+SEOForge 2.0 is a **high-throughput, local-first technical SEO crawler and audit platform** built as a zero-cost, private alternative to Screaming Frog (£209/yr) and Ahrefs ($129/mo). It requires **no API keys, makes no external LLM calls**, and persists everything to a high-concurrency local SQLite store reachable via a modern React dashboard, a REST API, or a 45-tool Model Context Protocol (MCP) server.
 
 Designed for autonomous AI coding agents (**Google Antigravity, Claude Code, Cursor, Codex CLI, OpenCode**), SEOForge crawls full sites using an event-driven asynchronous BFS queue, classifies pages against **60+ technical SEO and accessibility checks**, measures **Answer Engine Optimization (AEO)** for Google AI Overviews and Perplexity, executes **Google Research TimesFM zero-shot time series forecasting**, and generates deterministic, copy-paste-ready AI fix backlogs.
 

@@ -17,8 +17,8 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
   const [history, setHistory] = useState<ComparisonRow[]>([]);
 
   useEffect(() => {
-    api<{ crawls: CrawlSummary[] }>(`/api/crawls?limit=30`)
-      .then((r) => setCrawls(r.crawls ?? []))
+    api<CrawlSummary[]>(`/api/crawls?limit=30`)
+      .then((r) => setCrawls(Array.isArray(r) ? r : []))
       .catch(() => setCrawls([]));
     api<{ comparisons: ComparisonRow[] }>(`/api/competitors`)
       .then((r) => setHistory(r.comparisons))
@@ -77,7 +77,7 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
                   onChange={() => toggle(c.id)}
                   className="accent-sky-500"
                 />
-                <span className="text-xs text-white truncate flex-1">{c.targetUrl}</span>
+                <span className="text-xs text-text truncate flex-1">{c.targetUrl}</span>
                 <span className="text-[10px] text-faint tabular-nums">{c.totalUrlsCrawled} pages</span>
                 <span className="text-[10px] text-faint tabular-nums">AEO {c.averageAeoScore ?? 0}</span>
               </label>
@@ -117,7 +117,7 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
                 <tbody>
                   {comparison.metrics.map((m: any) => (
                     <tr key={m.key} className="border-b border-border">
-                      <td className="p-2.5 text-xs text-white">{m.label}</td>
+                      <td className="p-2.5 text-xs text-text">{m.label}</td>
                       <td className="p-2.5 text-xs font-bold tabular-nums text-sky-300">
                         {m.baseline === null ? "n/a" : m.baseline}
                         <span className="text-faint font-normal">{m.unit}</span>
@@ -158,7 +158,7 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
                 {comparison.gaps.map((g: any, i: number) => (
                   <div key={i} className="border-l-2 border-amber-500/40 pl-3">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-semibold text-white">{g.label}</span>
+                      <span className="text-xs font-semibold text-text">{g.label}</span>
                       <Badge className="bg-amber-500/15 text-amber-300">{g.severity}</Badge>
                     </div>
                     <div className="text-[10px] text-muted mb-1">
@@ -241,7 +241,7 @@ export default function Competitors({ crawlId }: { crawlId: string }) {
               <tbody>
                 {history.map((h) => (
                   <tr key={h.id} className="border-b border-border hover:bg-panel2/50">
-                    <td className="p-2.5 text-xs text-white truncate">{h.baselineUrl}</td>
+                    <td className="p-2.5 text-xs text-text truncate">{h.baselineUrl}</td>
                     <td className="p-2.5 text-xs text-muted truncate">{h.competitorUrls.join(", ")}</td>
                     <td className="p-2.5 text-xs text-faint">{h.createdAt}</td>
                   </tr>

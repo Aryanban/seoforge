@@ -20,6 +20,8 @@ export interface ResolvedCrawlOptions extends CrawlOptions {
   timeoutMs: number;
   followSitemap: boolean;
   maxRetries: number;
+  pageWorkers?: number;
+  checkpointPath?: string;
 }
 
 export const DEFAULT_CRAWL_OPTIONS: ResolvedCrawlOptions = {
@@ -89,7 +91,7 @@ const configSchema = z.object({
     sampleSitemap: z.number().int().nonnegative().optional(),
     canonicalPolicy: z.enum(["strict", "spa"]).optional(),
     respectRobots: z.boolean().optional(),
-    maxRequestsPerSecond: z.number().positive().optional(),
+    maxRequestsPerSecond: z.number().nonnegative().optional(), // 0 = uncapped
     excludePatterns: z.array(z.string()).optional(),
     checkExternalLinks: z.boolean().optional(),
     externalLinkTimeoutMs: z.number().positive().optional(),
@@ -157,7 +159,8 @@ export function mergeCrawlOptions(
     checkExternalLinks:
       domain.checkExternalLinks ?? config.crawl?.checkExternalLinks ?? DEFAULT_CRAWL_OPTIONS.checkExternalLinks,
     excludePatterns: domain.excludePatterns ?? config.crawl?.excludePatterns ?? [],
-    ...overrides,
+    // Only overrides that are actually set: { maxDepth: undefined } must not erase the config value.
+    ...Object.fromEntries(Object.entries(overrides ?? {}).filter(([, v]) => v !== undefined)),
   };
   return merged;
 }

@@ -1,30 +1,37 @@
 import React, { useEffect, useState } from "react";
-import { api, PagedResult, IssueRow, severityBg } from "../lib/api.js";
-import { Card, Badge, Input, Select, Spinner, EmptyState, Button } from "../components/ui.js";
+import { useSearchParams } from "react-router-dom";
+import { api, useApi, PagedResult, IssueRow, severityBg, safeHref } from "../lib/api.js";
+import { Card, Badge, Input, Select, Spinner, EmptyState, ErrorState, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 
 export default function Issues({ crawlId }: { crawlId: string }) {
-  const [data, setData] = useState<PagedResult<IssueRow> | null>(null);
-  const [severity, setSeverity] = useState("all");
-  const [search, setSearch] = useState("");
+  const [params] = useSearchParams();
+  const [severity, setSeverity] = useState(params.get("severity") ?? "all");
+  const [category, setCategory] = useState(params.get("category") ?? "all");
+  const [search, setSearch] = useState(params.get("q") ?? "");
+  const [categories, setCategories] = useState<string[]>([]);
+
+  useEffect(() => {
+    api<{ categories: { category: string }[] }>(`/api/crawl/${crawlId}/stats`)
+      .then((s) => setCategories(s.categories.map((c) => c.category)))
+      .catch(() => setCategories([]));
+  }, [crawlId]);
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const pageSize = 25;
 
   useEffect(() => {
     setPage(1);
-  }, [severity, search]);
+  }, [severity, category, search]);
 
-  useEffect(() => {
-    const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-    if (severity !== "all") q.set("severity", severity);
-    if (search) q.set("search", search);
-    api<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?${q.toString()}`)
-      .then(setData)
-      .catch(() => setData(null));
-  }, [crawlId, severity, search, page]);
+  const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (severity !== "all") q.set("severity", severity);
+  if (category !== "all") q.set("category", category);
+  if (search) q.set("search", search);
+  // useApi aborts the previous request, so a late page-3 response can't land under "page 1".
+  const { data, error } = useApi<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?${q.toString()}`);
 
-  if (!data) return <Spinner label="Loading issues…" />;
+  if (!data) return error ? <ErrorState message={error} /> : <Spinner label="Loading issues…" />;
 
   return (
     <div>
@@ -38,6 +45,14 @@ export default function Issues({ crawlId }: { crawlId: string }) {
               <option value="Error">Errors</option>
               <option value="Warning">Warnings</option>
               <option value="Notice">Notices</option>
+            </Select>
+            <Select value={category} onChange={setCategory}>
+              <option value="all">All categories</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </Select>
             <Input
               value={search}
@@ -100,7 +115,7 @@ export default function Issues({ crawlId }: { crawlId: string }) {
                             {issue.affectedUrls.slice(0, 15).map((u) => (
                               <a
                                 key={u}
-                                href={u}
+                                href={safeHref(u)}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="block text-sky-400 hover:text-sky-300 text-xs truncate transition-colors"

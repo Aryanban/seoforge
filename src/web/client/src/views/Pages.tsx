@@ -1,54 +1,113 @@
 import React, { useEffect, useState } from "react";
-import { api, PagedResult, PageRow, severityBg } from "../lib/api.js";
-import { Card, Badge, Input, Select, Spinner, EmptyState, StatusDot } from "../components/ui.js";
+import { useSearchParams } from "react-router-dom";
+import { useApi, PagedResult, PageRow, severityBg, safeHref } from "../lib/api.js";
+import { Card, Badge, Input, Select, Spinner, EmptyState, ErrorState, StatusDot, Button } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 import { Pager } from "./Issues.js";
 
+/** Filters that come from Overview chart links (shown as removable chips). */
+const CHIP_KEYS: Record<string, (v: string) => string> = {
+  depth: (v) => `Depth ${v === "10" ? "10+" : v}`,
+  indexable: (v) => (v === "1" ? "Indexable" : "Non-indexable"),
+  orphan: () => "Orphan pages",
+};
+
 export default function Pages({ crawlId }: { crawlId: string }) {
-  const [data, setData] = useState<PagedResult<PageRow> | null>(null);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
+  const [params, setParams] = useSearchParams();
+  const [search, setSearch] = useState(params.get("q") ?? "");
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<string | null>(null);
   const pageSize = 50;
+  const status = params.get("status") ?? "all";
+  const sort = params.get("sort") ?? "";
+  const dir = params.get("dir") === "desc" ? "desc" : "asc";
+
+  const setParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(params);
+    if (value === null || value === "" || value === "all") next.delete(key);
+    else next.set(key, value);
+    setParams(next, { replace: true });
+  };
+
+  const toggleSort = (col: string) => {
+    const next = new URLSearchParams(params);
+    if (sort === col && dir === "desc") {
+      next.set("dir", "asc");
+    } else if (sort === col) {
+      next.delete("sort");
+      next.delete("dir");
+    } else {
+      next.set("sort", col);
+      next.set("dir", "desc");
+    }
+    setParams(next, { replace: true });
+  };
 
   useEffect(() => {
     setPage(1);
-  }, [search, status]);
+  }, [search, params]);
 
-  useEffect(() => {
-    const q = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-    if (search) q.set("search", search);
-    if (status !== "all") q.set("status", status);
-    api<PagedResult<PageRow>>(`/api/crawl/${crawlId}/pages?${q.toString()}`)
-      .then((r) => setData(r as any))
-      .catch(() => setData(null));
-  }, [crawlId, search, status, page]);
+  const q = new URLSearchParams(params);
+  q.delete("q");
+  q.set("page", String(page));
+  q.set("pageSize", String(pageSize));
+  if (search) q.set("search", search);
+  // Aborts the superseded request: no stale page/filter response can overwrite the current one.
+  const { data, error } = useApi<PagedResult<PageRow>>(`/api/crawl/${crawlId}/pages?${q.toString()}`);
 
-  if (!data) return <Spinner label="Loading pages…" />;
+  if (!data) return error ? <ErrorState message={error} /> : <Spinner label="Loading pages…" />;
+
+  const chips = Object.keys(CHIP_KEYS).filter((k) => params.get(k));
+  const Th = ({ col, label, align = "right" }: { col?: string; label: string; align?: "left" | "right" }) => (
+    <th className={`p-3 font-medium text-${align}`} aria-sort={col && sort === col ? (dir === "desc" ? "descending" : "ascending") : undefined}>
+      {col ? (
+        <button onClick={() => toggleSort(col)} className={`uppercase tracking-wide hover:text-text ${sort === col ? "text-text" : ""}`}>
+          {label}
+          <span className="ml-1 inline-block w-2">{sort === col ? (dir === "desc" ? "↓" : "↑") : ""}</span>
+        </button>
+      ) : (
+        label
+      )}
+    </th>
+  );
 
   return (
     <div>
       <PageHeader
         title="Pages"
-        subtitle={`${data.total} page${data.total === 1 ? "" : "s"} crawled · click a row for full audit detail`}
+        subtitle={`${data.total.toLocaleString()} page${data.total === 1 ? "" : "s"} · click a row for audit detail · click a column to sort`}
         actions={
           <div className="flex items-center gap-2">
-            <Select value={status} onChange={setStatus}>
+            <Select value={status} onChange={(v) => setParam("status", v)}>
               <option value="all">All statuses</option>
-              <option value="ok">200 OK</option>
-              <option value="redirect">Redirects</option>
-              <option value="broken">Broken (4XX/5XX)</option>
+              <option value="2xx">2xx Success</option>
+              <option value="3xx">3xx Redirects</option>
+              <option value="4xx">4xx Client errors</option>
+              <option value="5xx">5xx Server errors</option>
+              <option value="failed">Failed / blocked</option>
             </Select>
-            <Input
-              value={search}
-              onChange={setSearch}
-              placeholder="Filter by URL or title…"
-              className="w-52"
-            />
+            <Input value={search} onChange={setSearch} placeholder="Filter by URL or title…" className="w-52" />
+            <a href={`/api/crawl/${crawlId}/export/pages`} download>
+              <Button title="Download every crawled page as CSV">Export CSV</Button>
+            </a>
           </div>
         }
       />
+
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-2 -mt-2 mb-4">
+          {chips.map((k) => (
+            <button
+              key={k}
+              onClick={() => setParam(k, null)}
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-indigo-500/12 text-indigo-300 border border-indigo-500/25 hover:bg-indigo-500/20"
+              aria-label={`Remove filter ${CHIP_KEYS[k](params.get(k)!)}`}
+            >
+              {CHIP_KEYS[k](params.get(k)!)} <span aria-hidden>×</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {data.rows.length === 0 ? (
         <Card>
@@ -60,15 +119,15 @@ export default function Pages({ crawlId }: { crawlId: string }) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-[10px] text-faint uppercase tracking-wide border-b border-border whitespace-nowrap">
-                  <th className="text-left p-3 font-medium">URL</th>
-                  <th className="text-right p-3 font-medium">Status</th>
-                  <th className="text-right p-3 font-medium">Depth</th>
-                  <th className="text-right p-3 font-medium">TTFB</th>
-                  <th className="text-right p-3 font-medium">Words</th>
-                  <th className="text-right p-3 font-medium">Links in/out</th>
-                  <th className="text-right p-3 font-medium">AEO</th>
-                  <th className="text-left p-3 font-medium">Schema</th>
-                  <th className="text-right p-3 font-medium">Issues</th>
+                  <Th col="url" label="URL" align="left" />
+                  <Th col="status" label="Status" />
+                  <Th col="depth" label="Depth" />
+                  <Th col="responseTimeMs" label="Time" />
+                  <Th col="wordCount" label="Words" />
+                  <Th col="incomingLinks" label="Links in/out" />
+                  <Th col="aeoScore" label="AEO" />
+                  <Th label="Schema" align="left" />
+                  <Th label="Issues" />
                 </tr>
               </thead>
               <tbody>
@@ -80,7 +139,7 @@ export default function Pages({ crawlId }: { crawlId: string }) {
                     >
                       <td className="p-3 max-w-xs truncate">
                         <a
-                          href={p.url}
+                          href={safeHref(p.url)}
                           target="_blank"
                           rel="noreferrer"
                           className="text-sky-400 hover:text-sky-300 transition-colors"
@@ -105,7 +164,7 @@ export default function Pages({ crawlId }: { crawlId: string }) {
                       </td>
                       <td className="p-3 text-right tabular-nums">{p.depth}</td>
                       <td className="p-3 text-right tabular-nums whitespace-nowrap">
-                        {p.ttfbMs ?? p.responseTimeMs}ms
+                        <span title={p.ttfbMs !== undefined ? `TTFB ${p.ttfbMs} ms` : undefined}>{p.responseTimeMs.toLocaleString()} ms</span>
                       </td>
                       <td className="p-3 text-right tabular-nums">{p.wordCount}</td>
                       <td className="p-3 text-right tabular-nums whitespace-nowrap">

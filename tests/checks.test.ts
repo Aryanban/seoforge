@@ -89,6 +89,15 @@ describe("check engine", () => {
     expect(ids).toContain("internal_nofollow");
   });
 
+  it("uses Screaming Frog's 1,000 followed-internal-outlink threshold for too_many_links", () => {
+    const page = (n: number, rel = "") =>
+      `<html><head><title>t</title></head><body>${Array.from({ length: n }, (_, i) => `<a ${rel} href="/p/${i}">p${i}</a>`).join("")}</body></html>`;
+    const ids = (html: string) => runPageChecks(ctxFor(html)).page.auditIssues.map((i) => i.id);
+    expect(ids(page(250))).not.toContain("too_many_links");
+    expect(ids(page(1000))).toContain("too_many_links");
+    expect(ids(page(1200, 'rel="nofollow"'))).not.toContain("too_many_links");
+  });
+
   it("flags images without alt text and without dimensions", () => {
     const html = `<html><head><title>T</title></head><body><h1>Imgs</h1><img src="/a.png"></body></html>`;
     const { page } = runPageChecks(ctxFor(html));

@@ -118,13 +118,14 @@ export function statusIndexabilityChecks(ctx: PageCheckContext): CheckOutput {
 
   // Redirect loop detection
   const chain = ctx.redirectChain || [];
-  if (chain.length > 1 && chain[0] === chain[chain.length - 1]) {
+  // Any repeated hop is a loop (A→B→C→B too), not only one that returns to the start URL.
+  if (chain.length > 1 && new Set(chain).size < chain.length) {
     issues.push({
       id: "redirect_loop",
       name: "Redirect loop",
       severity: "Error",
       category: "Indexability",
-      message: `URL redirects back to itself, creating an infinite loop: ${chain.join(" → ")}.`,
+      message: `Redirect chain loops back on itself, so it never resolves: ${chain.join(" → ")}.`,
       url: pageUrl,
     });
   }
@@ -159,7 +160,8 @@ export function statusIndexabilityChecks(ctx: PageCheckContext): CheckOutput {
   // covered by canonical_mismatch; flag duplicate protocol+host variants here.
   if (ctx.meta.canonical && status === 200) {
     try {
-      const canonHost = new URL(ctx.meta.canonical).origin.toLowerCase();
+      // Relative canonicals are valid (resolved against the page URL), not "invalid URL" errors.
+      const canonHost = new URL(ctx.meta.canonical, ctx.finalUrl || pageUrl).origin.toLowerCase();
       const pageHost = new URL(ctx.finalUrl || pageUrl).origin.toLowerCase();
       if (canonHost !== pageHost) {
         issues.push({

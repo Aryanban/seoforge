@@ -77,7 +77,8 @@ export function imageChecks(ctx: PageCheckContext): CheckOutput {
   }
 
   // Image used as a link with no anchor text
-  const linkedNoText = images.filter((img) => img.inLink);
+  // Alt text is the link's anchor text (Google), so only alt-less image links lack one.
+  const linkedNoText = images.filter((img) => img.inLink && !img.alt?.trim());
   if (linkedNoText.length > 0) {
     issues.push({
       id: "image_link_no_anchor",

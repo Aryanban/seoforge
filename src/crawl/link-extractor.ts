@@ -30,6 +30,8 @@ export function extractLinks(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl
   } catch {
     base = new URL("https://example.com");
   }
+  // Internal = same origin as the page itself, even when <base href> points elsewhere (e.g. a CDN).
+  const pageOrigin = base.origin;
 
   // Honor <base href>
   const baseHref = $("base").attr("href");
@@ -54,10 +56,18 @@ export function extractLinks(htmlOrCheerio: string | cheerio.CheerioAPI, pageUrl
       return;
     }
 
-    const anchorText = $(el).text().trim().replace(/\s+/g, " ");
-    const rel = $(el).attr("rel")?.toLowerCase() || "";
-    const nofollow = rel.includes("nofollow") || rel.includes("sponsored") || rel.includes("ugc");
-    const isInternal = resolved.origin === base.origin;
+    // Text, else the accessible name: aria-label, then image alt (Google uses alt as anchor text).
+    const $el = $(el);
+    const anchorText = (
+      $el.text().trim() ||
+      $el.attr("aria-label")?.trim() ||
+      $el.find("img[alt]").first().attr("alt")?.trim() ||
+      ""
+    ).replace(/\s+/g, " ");
+    const rel = $el.attr("rel")?.toLowerCase() || "";
+    const relTokens = rel.split(/\s+/);
+    const nofollow = relTokens.includes("nofollow") || relTokens.includes("sponsored") || relTokens.includes("ugc");
+    const isInternal = resolved.origin === pageOrigin;
 
     links.push({
       source: pageUrl,
@@ -150,7 +160,10 @@ export function extractVisibleText(htmlOrCheerio: string | cheerio.CheerioAPI): 
   const walk = (nodes: any[]): void => {
     for (const node of nodes) {
       if (node.type === "text") parts.push(node.data);
-      else if (node.children && !VISIBLE_TEXT_SKIP.has(String(node.name).toLowerCase())) walk(node.children);
+      else if (node.children && !VISIBLE_TEXT_SKIP.has(String(node.name).toLowerCase())) {
+        walk(node.children);
+        if (BLOCK_TAGS.has(String(node.name).toLowerCase())) parts.push(" ");
+      }
     }
   };
   walk(htmlOrCheerio("body").toArray().flatMap((b: any) => b.children ?? []));
@@ -161,6 +174,50 @@ export function extractVisibleText(htmlOrCheerio: string | cheerio.CheerioAPI): 
 
 const VISIBLE_TEXT_SKIP = new Set(["script", "style", "noscript", "svg", "link", "meta", "template"]);
 const visibleTextCache = new WeakMap<object, string>();
+// Block boundaries separate words: "<h1>Title</h1><p>Body</p>" is two words, not "TitleBody".
+const BLOCK_TAGS = new Set(
+  "address article aside blockquote br dd details div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section summary table tbody td tfoot th thead tr ul option button label".split(" ")
+);
+
+// Page chrome left out of main content (Screaming Frog's default content area
+// also excludes nav and footer). Elements and their ARIA landmark roles.
+const CHROME_TAGS = new Set(["nav", "header", "footer", "aside"]);
+const CHROME_ROLES = new Set(["navigation", "banner", "contentinfo", "complementary", "search"]);
+const mainTextCache = new WeakMap<object, string>();
+
+/**
+ * Main-content text for word count and duplicate detection: the single
+ * <main>/[role=main] element when there is one, else <body> without
+ * header/nav/footer/aside landmarks. Falls back to all visible text when that
+ * leaves nothing. Cheap DOM heuristic, no Readability/jsdom on the hot path.
+ */
+export function extractMainText($: cheerio.CheerioAPI): string {
+  const cached = mainTextCache.get($);
+  if (cached !== undefined) return cached;
+  const main = $('main, [role="main"]');
+  const roots = main.length === 1 ? main.toArray() : $("body").toArray();
+  const parts: string[] = [];
+  const walk = (nodes: any[]): void => {
+    for (const node of nodes) {
+      if (node.type === "text") {
+        parts.push(node.data);
+        continue;
+      }
+      if (!node.children) continue;
+      const name = String(node.name).toLowerCase();
+      if (VISIBLE_TEXT_SKIP.has(name)) continue;
+      // Inside <main>, keep its own <header> (often the H1); drop nav/aside/footer.
+      if (CHROME_TAGS.has(name) && !(main.length === 1 && name === "header")) continue;
+      if (CHROME_ROLES.has(String(node.attribs?.role ?? "").toLowerCase())) continue;
+      walk(node.children);
+      if (BLOCK_TAGS.has(name)) parts.push(" ");
+    }
+  };
+  walk(roots.flatMap((r: any) => r.children ?? []));
+  const text = parts.join("").replace(/\s+/g, " ").trim() || extractVisibleText($);
+  mainTextCache.set($, text);
+  return text;
+}
 
 export function countWords(text: string): number {
   return text ? text.split(/\s+/).filter(Boolean).length : 0;

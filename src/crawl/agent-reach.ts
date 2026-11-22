@@ -136,7 +136,7 @@ export async function agentReachRead(
   }
 
   try {
-    const { stdout } = await execFileAsync("agent-reach", args, { timeout: timeoutMs });
+    const { stdout } = await execFileAsync("agent-reach", args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
     const trimmed = stdout.trim();
     const parsed = JSON.parse(trimmed);
     return {
@@ -168,8 +168,11 @@ function escapeHtml(str: string): string {
  * and format paragraphs so link extraction and text analysis work seamlessly.
  */
 function markdownToHtml(text: string): string {
-  const withLinks = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label, href) => {
-    return `<a href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+  // Escape everything first so scraped text can never become live markup (e.g. a
+  // quoted <meta name="robots" content="noindex"> turning the page noindex), then
+  // turn markdown links (whose label/href are now already escaped) into anchors.
+  const withLinks = escapeHtml(text).replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label, href) => {
+    return `<a href="${href}">${label}</a>`;
   });
 
   const paragraphs = withLinks

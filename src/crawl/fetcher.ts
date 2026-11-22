@@ -56,6 +56,9 @@ const crawlerDispatcher = new Agent({
   keepAliveMaxTimeout: 120000,
   connections: 128,
   pipelining: 1,
+  // Negotiate HTTP/2 via ALPN where the server offers it (Googlebot does too);
+  // falls back to HTTP/1.1 keep-alive otherwise.
+  allowH2: true,
   connect: { lookup: cachedLookup },
 });
 
@@ -75,6 +78,8 @@ export interface FetchResult {
   contentType?: string;
   contentLengthBytes?: number;
   errorMessage?: string;
+  /** Undecoded body, when FetchOptions.bytes is set. */
+  bytes?: Buffer;
 }
 
 export interface FetchOptions {
@@ -83,6 +88,10 @@ export interface FetchOptions {
   method?: "GET" | "HEAD";
   followRedirects?: boolean;
   maxRedirects?: number;
+  /** GET for the status only: cancel the body stream instead of downloading it. */
+  discardBody?: boolean;
+  /** Keep the raw body bytes (gzip files) and raise the size cap to this many bytes. */
+  bytes?: number;
 }
 
 export async function fetchPage(url: string, options: FetchOptions = {}): Promise<FetchResult> {
@@ -120,7 +129,6 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.9",
           "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
         },
       } as any);
       const hopTtfb = Date.now() - hopStart;
@@ -137,29 +145,37 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
         });
 
         let html = "";
+        let bytes: Buffer | undefined;
+        let bodyBytes: number | undefined;
         const cType = (res.headers.get("content-type") || "").toLowerCase();
         const isHtmlOrXml = /text\/html|application\/xhtml\+xml|application\/xml|text\/xml/i.test(cType);
         const cLength = parseInt(res.headers.get("content-length") || "0", 10);
 
-        if (method === "GET" && status < 400) {
-          if (!isHtmlOrXml && /image\/|video\/|audio\/|application\/pdf|application\/zip|font\//.test(cType)) {
-            html = "";
-          } else if (cLength > 10 * 1024 * 1024) {
-            html = "";
+        if (options.discardBody) {
+          await res.body?.cancel().catch(() => {});
+        } else if (options.bytes && method === "GET" && status < 400) {
+          if (cLength > options.bytes) {
+            await res.body?.cancel().catch(() => {});
           } else {
-            try {
-              html = await res.text();
-            } catch {
-              html = "";
-            }
+            bytes = Buffer.from(await res.arrayBuffer());
+            if (bytes.length > options.bytes) bytes = undefined;
+            else html = bytes.toString("utf8");
+          }
+        } else if (method === "GET" && status < 400) {
+          if (
+            (!isHtmlOrXml && /image\/|video\/|audio\/|application\/pdf|application\/zip|font\//.test(cType)) ||
+            cLength > MAX_BODY_BYTES
+          ) {
+            // Cancel, don't abandon: an unread body pins the keep-alive socket.
+            await res.body?.cancel().catch(() => {});
+          } else {
+            const body = await readCapped(res, MAX_BODY_BYTES);
+            html = decodeBody(body.bytes, cType);
+            bodyBytes = body.bytes.length;
           }
         } else if (method === "GET") {
           // Still drain error bodies (bounded) for diagnostics; not audited.
-          try {
-            html = (await res.text()).slice(0, 65536);
-          } catch {
-            html = "";
-          }
+          html = decodeBody((await readCapped(res, 65536)).bytes, cType);
         }
         const responseTimeMs = Date.now() - start;
 
@@ -176,11 +192,17 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           redirectChain: Array.from(new Set(chain)),
           redirectStatusCode: firstRedirectCode,
           contentType: headers["content-type"],
-          contentLengthBytes: headers["content-length"] ? parseInt(headers["content-length"], 10) : html.length,
+          // Bytes on the wire after decompression; html.length would count UTF-16 units.
+          contentLengthBytes: headers["content-length"]
+            ? parseInt(headers["content-length"], 10)
+            : bodyBytes ?? bytes?.length ?? Buffer.byteLength(html),
+          bytes,
         };
       }
 
-      // Follow one hop manually
+      // Follow one hop manually. Release the redirect body first so undici can
+      // reuse the socket for the next hop instead of opening a new connection.
+      await res.body?.cancel().catch(() => {});
       if (firstRedirectCode === undefined) firstRedirectCode = status;
       hops++;
       if (hops > maxRedirects) {
@@ -232,7 +254,7 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
           finalUrl: current,
           requestedUrl: url,
           redirected: true,
-          redirectChain: Array.from(new Set(chain)),
+          redirectChain: chain, // not deduped: the repeated URL is what marks the loop
           redirectStatusCode: firstRedirectCode,
           errorMessage: `Redirect loop detected: ${chain.join(" → ")}`,
         };
@@ -259,6 +281,52 @@ export async function fetchPage(url: string, options: FetchOptions = {}): Promis
     };
   } finally {
     clearTimeout(timeoutId);
+  }
+}
+
+const MAX_BODY_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Read at most `max` bytes, then cancel the stream. Bounds memory when a server
+ * omits Content-Length (chunked) and streams an unexpectedly large body.
+ */
+async function readCapped(res: Response, max: number): Promise<{ bytes: Buffer; truncated: boolean }> {
+  if (!res.body) return { bytes: Buffer.alloc(0), truncated: false };
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+      if (total >= max) {
+        await reader.cancel().catch(() => {});
+        return { bytes: Buffer.concat(chunks).subarray(0, max), truncated: true };
+      }
+    }
+  } catch {
+    /* connection dropped mid-body: keep what arrived */
+  }
+  return { bytes: Buffer.concat(chunks), truncated: false };
+}
+
+/**
+ * Decode with the charset from Content-Type, else a <meta charset> in the first
+ * 2 KB (HTML spec prescan), else UTF-8. res.text() always assumes UTF-8, which
+ * garbles titles/text on windows-1252, Shift_JIS, GBK, etc. sites.
+ */
+export function decodeBody(bytes: Uint8Array, contentType: string): string {
+  let label = /charset=["']?([\w-]+)/i.exec(contentType)?.[1];
+  if (!label) {
+    const head = Buffer.from(bytes.subarray(0, 2048)).toString("latin1");
+    label = /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1];
+  }
+  try {
+    return new TextDecoder(label || "utf-8").decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
   }
 }
 

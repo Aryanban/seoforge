@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api.js";
-import { Card, Button, Spinner } from "../components/ui.js";
+import { Card, Button, Spinner, EmptyState } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 
 const CLI_HINTS = [
@@ -56,7 +56,7 @@ export default function Settings() {
     }
   };
 
-  if (!config) return <Spinner label="Loading config…" />;
+  if (!config) return message ? <EmptyState message={message} hint="Create seoforge.config.json in the folder you run seoforge from." /> : <Spinner label="Loading config…" />;
 
   const domainCount = config.domains?.length ?? 0;
 

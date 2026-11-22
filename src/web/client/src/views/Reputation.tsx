@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { api } from "../lib/api.js";
+import { api, safeHref } from "../lib/api.js";
 import { Card, Button, Badge, Input, EmptyState, PageHeader } from "../components/ui.js";
 
 interface AssessmentRow {
@@ -137,9 +137,9 @@ export default function Reputation() {
         <Card className="p-5">
           <h2 className="text-sm font-semibold mb-4">Verify sources</h2>
           <div className="space-y-3">
-            <Input placeholder="Your site URL *" value={form.target} onChange={(e: any) => setForm({ ...form, target: e.target.value })} />
-            <Input placeholder="Brand name *" value={form.brand} onChange={(e: any) => setForm({ ...form, brand: e.target.value })} />
-            <Input placeholder="Brand aliases (comma-separated)" value={form.aliases} onChange={(e: any) => setForm({ ...form, aliases: e.target.value })} />
+            <Input placeholder="Your site URL *" value={form.target} onChange={(v: string) => setForm({ ...form, target: v })} />
+            <Input placeholder="Brand name *" value={form.brand} onChange={(v: string) => setForm({ ...form, brand: v })} />
+            <Input placeholder="Brand aliases (comma-separated)" value={form.aliases} onChange={(v: string) => setForm({ ...form, aliases: v })} />
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-[10px] uppercase tracking-wide text-faint">Candidate source URLs (one per line)</span>
@@ -154,7 +154,7 @@ export default function Reputation() {
               </div>
               {discoveryNote && <div className="text-[11px] text-emerald-400 mb-1.5 font-medium">{discoveryNote}</div>}
               <textarea
-                className="w-full bg-bg border border-border rounded-md p-2 text-xs text-white font-mono h-28"
+                className="w-full bg-bg border border-border rounded-md p-2 text-xs text-text font-mono h-28"
                 placeholder={"https://en.wikipedia.org/wiki/Example.com\nhttps://news.example.com/article"}
                 value={form.sources}
                 onChange={(e) => setForm({ ...form, sources: e.target.value })}
@@ -176,10 +176,10 @@ export default function Reputation() {
               <ScoreBadge result={result.result} />
               <div className="text-xs text-muted">
                 Sensitivity range:{" "}
-                <span className="text-white tabular-nums">
+                <span className="text-text tabular-nums">
                   {result.result.score_range ? result.result.score_range.join(" – ") : "withheld"}
                 </span>{" "}
-                · confidence: <span className="text-white">{result.result.confidence}</span>
+                · confidence: <span className="text-text">{result.result.confidence}</span>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <Stat label="Observed links" value={result.result.observed_link_pages} />
@@ -196,7 +196,7 @@ export default function Reputation() {
                   {result.result.top_backlinks.slice(0, 5).map((s: any) => (
                     <a
                       key={s.source_url}
-                      href={s.source_url}
+                      href={safeHref(s.source_url)}
                       target="_blank"
                       rel="noreferrer"
                       className="block text-sky-400 hover:text-sky-300 text-xs truncate"
@@ -223,7 +223,7 @@ export default function Reputation() {
               <tbody>
                 {assessments.map((a) => (
                   <tr key={a.id} className="border-b border-border hover:bg-panel2/50">
-                    <td className="p-2.5 text-xs text-white tabular-nums w-20">
+                    <td className="p-2.5 text-xs text-text tabular-nums w-20">
                       {a.score === null ? "—" : a.score}
                     </td>
                     <td className="p-2.5 text-xs text-muted truncate">{a.target}</td>
@@ -244,7 +244,7 @@ export default function Reputation() {
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="bg-panel2/50 rounded-md p-2.5">
-      <div className="text-lg font-bold tabular-nums text-white">{value}</div>
+      <div className="text-lg font-bold tabular-nums text-text">{value}</div>
       <div className="text-[10px] text-faint uppercase tracking-wide">{label}</div>
     </div>
   );

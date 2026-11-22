@@ -39,12 +39,11 @@ export class CrawlQueue {
   waitForItem(timeoutMs = 1000): Promise<void> {
     if (this.size > 0) return Promise.resolve();
     return new Promise<void>((resolve) => {
-      let timer: NodeJS.Timeout;
       const done = () => {
         clearTimeout(timer);
         resolve();
       };
-      timer = setTimeout(() => {
+      const timer: NodeJS.Timeout = setTimeout(() => {
         const idx = this.waiters.indexOf(done);
         if (idx !== -1) this.waiters.splice(idx, 1);
         resolve();
@@ -120,6 +119,18 @@ export class CrawlQueue {
     return this.seen.has(normalizedUrl);
   }
 
+  /** Pending items + dedupe state, for crawl checkpoints. */
+  snapshot(): { items: QueueItem[]; seen: string[]; enqueuedCount: number } {
+    return { items: this.queue.slice(this.head), seen: [...this.seen], enqueuedCount: this.enqueuedCount };
+  }
+
+  restore(s: { items: QueueItem[]; seen: string[]; enqueuedCount: number }): void {
+    this.queue = s.items;
+    this.head = 0;
+    this.seen = new Set(s.seen);
+    this.enqueuedCount = s.enqueuedCount;
+  }
+
   get isBudgetExhausted(): boolean {
     return this.enqueuedCount >= this.limit;
   }
@@ -163,13 +174,21 @@ export function isSameOrigin(a: string, b: string): boolean {
   }
 }
 
+/** Compiled exclude patterns; null marks an invalid regex (substring match instead). */
+const patternCache = new Map<string, RegExp | null>();
+
 export function matchesPatterns(url: string, patterns: string[]): boolean {
   if (!patterns || patterns.length === 0) return false;
   return patterns.some((pattern) => {
-    try {
-      return new RegExp(pattern).test(url);
-    } catch {
-      return url.toLowerCase().includes(pattern.toLowerCase());
+    let re = patternCache.get(pattern);
+    if (re === undefined) {
+      try {
+        re = new RegExp(pattern);
+      } catch {
+        re = null;
+      }
+      patternCache.set(pattern, re);
     }
+    return re ? re.test(url) : url.toLowerCase().includes(pattern.toLowerCase());
   });
 }

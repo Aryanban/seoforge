@@ -21,7 +21,7 @@ const ICONS: Record<string, React.ReactNode> = {
   issues: <path d="M12 3 2 21h20L12 3Zm1 6v6h-2V9h2Zm-1 9.5a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Z" />,
   pages: <path d="M4 4h16v4H4V4Zm0 6h16v4H4v-4Zm0 6h16v4H4v-4Z" />,
   links: <path d="M7 7h6v6h4V7h-4V5h6v4h-2v6h-6v-2H7v6H5v-8h2V7Zm12 12v-6h2v6h-2ZM5 5h8v2H5V5Z" />,
-  sitemaps: <path d="M4 6h16M4 12h16M4 18h10" />,
+  sitemaps: <path d="M9 2h6v6h-2v3h7v5h2v6h-6v-6h2v-3h-5v3h2v6H9v-6h2v-3H6v3h2v6H2v-6h2v-5h7V8H9V2Zm2 2v2h2V4h-2ZM4 18v2h2v-2H4Zm7 0v2h2v-2h-2Zm7 0v2h2v-2h-2Z" />,
   ai: <path d="m12 2 2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8L12 2Z" />,
   megaphone: <path d="M3 11v3l2 1 12 5V6L5 10H3Zm2 2v-1h.7l9.3 3.8V9.2L5.7 13H5Zm-2 6h6v-2H3v2Z" />,
   shield: <path d="M12 2 4 5v6c0 5 3.4 9.6 8 11 4.6-1.4 8-6 8-11V5l-8-3Zm0 2.2 6 2.2V11c0 4.2-2.7 8-6 9.2-3.3-1.2-6-5-6-9.2V6.4l6-2.2Z" />,
@@ -158,10 +158,13 @@ export default function App() {
       refreshCrawls();
       setTimeout(() => setPct(0), 1500);
     });
-    es.addEventListener("error", () => {
+    es.addEventListener("error", (ev: any) => {
+      // A transient network drop (no data, stream still CONNECTING) is retried by
+      // EventSource itself; keep the crawl marked as running meanwhile.
+      if (!ev?.data && es.readyState !== EventSource.CLOSED) return;
       es.close();
       setRunning(false);
-      setProgress("");
+      setProgress(ev?.data ? `Crawl failed: ${(() => { try { return JSON.parse(ev.data).message ?? JSON.parse(ev.data).error; } catch { return "unknown error"; } })()}` : "");
       setPct(0);
     });
   };
@@ -197,8 +200,8 @@ export default function App() {
               className={({ isActive }) =>
                 `flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-all duration-150 ${
                   isActive
-                    ? "bg-indigo-500/12 text-white font-medium"
-                    : "text-zinc-400 hover:text-white hover:bg-panel3/70"
+                    ? "bg-indigo-500/12 text-text font-medium"
+                    : "text-zinc-400 hover:text-text hover:bg-panel3/70"
                 }`
               }
             >
@@ -213,6 +216,8 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
+
+        <ThemeToggle />
 
         {crawl && (
           <div className="px-3.5 py-3 border-t border-border">
@@ -402,4 +407,35 @@ function OptRow({ label, children }: { label: string; children: React.ReactNode 
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? "dark");
+  const next = theme === "dark" ? "light" : "dark";
+  const toggle = () => {
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("seoforge-theme", next);
+    } catch {
+      /* storage blocked: theme still applies for this session */
+    }
+    setTheme(next);
+  };
+  return (
+    <button
+      onClick={toggle}
+      aria-label={`Switch to ${next} mode`}
+      title={`Switch to ${next} mode`}
+      className="mx-2 mb-2 flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] text-muted hover:text-text hover:bg-panel3/70 transition-colors"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-[15px] h-[15px]" aria-hidden>
+        {theme === "dark" ? (
+          <path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm0-5 1.2 3h-2.4L12 2Zm0 20-1.2-3h2.4L12 22ZM2 12l3-1.2v2.4L2 12Zm20 0-3 1.2v-2.4L22 12ZM4.9 4.9l3 1.3-1.7 1.7-1.3-3Zm14.2 14.2-3-1.3 1.7-1.7 1.3 3Zm0-14.2-1.3 3-1.7-1.7 3-1.3ZM4.9 19.1l1.3-3 1.7 1.7-3 1.3Z" />
+        ) : (
+          <path d="M12.3 2a9 9 0 1 0 9.7 11.8A7.5 7.5 0 0 1 12.3 2Z" />
+        )}
+      </svg>
+      {theme === "dark" ? "Light mode" : "Dark mode"}
+    </button>
+  );
 }

@@ -5,6 +5,7 @@
  */
 import { Command } from "commander";
 import fs from "fs/promises";
+import { existsSync } from "node:fs";
 import path from "path";
 import { green, red, cyan, bold, yellow, gray } from "colorette";
 import {
@@ -13,7 +14,7 @@ import {
   DomainAuditResult,
   OverallAuditReport,
 } from "./types.js";
-import { crawlSite } from "./crawl/crawler.js";
+import { crawlSite, Crawler, crawlIdId } from "./crawl/crawler.js";
 import { auditSinglePage } from "./audit-page.js";
 import { submitToIndexNow } from "./indexnow.js";
 import {
@@ -46,7 +47,7 @@ import {
 } from "./reputation/index.js";
 import { compareCompetitors, comparisonMarkdown } from "./competitors/index.js";
 import { compareCrawls, formatCrawlDiffMarkdown } from "./analysis/crawl-diff.js";
-import { analyzeLogs } from "./analysis/log-parser.js";
+import { analyzeLogs, parseLogLine, verifyCrawlerHits, LogEntry } from "./analysis/log-parser.js";
 import { detectCannibalization } from "./analysis/cannibalization.js";
 import { estimateVolumes, createTrendsFetcher, autocomplete, type GscAnchor } from "./keyword-volume.js";
 import { scoreContent } from "./analysis/live-content-scorer.js";
@@ -131,6 +132,7 @@ program
   .option("-d, --depth <n>", "Maximum crawl depth", "10")
   .option("-l, --limit <n>", "Crawl budget (max pages)", "1000")
   .option("-c, --concurrency <n>", "Concurrent requests", "12")
+  .option("--max-rps <n>", "Max requests per second to the site (0 = uncapped; use only on sites you own)")
   .option("-r, --render", "Enable Playwright JS rendering for SPAs")
   .option("--reach", "Enable Agent Reach engine for login-walled/anti-bot platforms (Reddit, Twitter, YouTube, etc.)")
   .option("-s, --strategy <strategy>", "Crawl strategy: discover | sitemap | config", "discover")
@@ -141,8 +143,9 @@ program
   .option("--sitemap <url>", "Use this sitemap URL instead of auto-discovering one")
   .option("--seeds <file>", "File of extra seed URLs (one per line; blank lines and # comments ignored)")
   .option("--production-origin <origin>", "Production origin for staging/local audits (rewrites sitemap/seed URLs and treats its canonical/hreflang/og URLs as same-site)")
+  .option("--resume <crawlId>", "Resume an interrupted or stopped crawl from its checkpoint (same URL)")
   .option("--all-sitemap", "Crawl every sitemap URL: sets strategy=sitemap and raises the default limit to 200000")
-  .action(async (url: string | undefined, options) => {
+  .action(async (url: string | undefined, options, command: Command) => {
     const config = await loadConfig().catch(() => null);
     let targetUrl = url;
     let extra: CrawlOptions = {};
@@ -183,25 +186,76 @@ program
     }
 
     const opts: CrawlOptions = {
-      maxDepth: parseInt(options.depth, 10),
-      limit: parseInt(options.limit, 10),
-      concurrency: parseInt(options.concurrency, 10),
+      maxDepth: intOption(options.depth, "--depth"),
+      limit: intOption(options.limit, "--limit"),
+      concurrency: intOption(options.concurrency, "--concurrency"),
       render: !!options.render,
       reach: !!options.reach,
       strategy: options.strategy,
-      sampleSitemap: options.sample ? parseInt(options.sample, 10) : undefined,
+      sampleSitemap: options.sample ? intOption(options.sample, "--sample") : undefined,
       respectRobots: options.robots !== false,
       checkExternalLinks: options.external !== false,
       ...extra,
     };
+    // Flags typed on the command line beat seoforge.config.json values (config mode).
+    const fromCli = (name: string) => command.getOptionValueSource(name) === "cli";
+    if (fromCli("depth")) opts.maxDepth = intOption(options.depth, "--depth");
+    if (fromCli("limit")) opts.limit = intOption(options.limit, "--limit");
+    if (fromCli("concurrency")) opts.concurrency = intOption(options.concurrency, "--concurrency");
+    if (fromCli("render")) opts.render = true;
+    if (fromCli("reach")) opts.reach = true;
+    if (fromCli("external")) opts.checkExternalLinks = false;
+    if (fromCli("robots")) opts.respectRobots = false;
+    if (fromCli("strategy")) opts.strategy = options.strategy;
     if (options.allSitemap) opts.strategy = "sitemap";
+    if (options.maxRps !== undefined) {
+      const rps = Number(options.maxRps);
+      if (!Number.isFinite(rps) || rps < 0) {
+        console.error(red(`Invalid --max-rps: ${options.maxRps}`));
+        process.exit(1);
+      }
+      opts.maxRequestsPerSecond = rps;
+    }
     if (options.sitemap) opts.sitemapOverride = options.sitemap;
     if (seedUrls) opts.seedUrls = seedUrls;
     if (productionOrigin) opts.productionOrigin = productionOrigin;
 
     console.log(bold(cyan(`\n🕸  Crawling ${targetUrl} (depth ${opts.maxDepth}, budget ${opts.limit}, strategy ${opts.strategy}${opts.render ? ", render mode" : ""}${opts.reach ? ", reach mode" : ""})…\n`)));
 
-    const result = await crawlSite(targetUrl, opts);
+    if (options.resume && !/^[\w-]+$/.test(options.resume)) {
+      console.error(red(`Invalid --resume id: ${options.resume}`));
+      process.exit(1);
+    }
+    const crawlId = crawlIdId(options.resume);
+    const checkpointPath = path.join(process.cwd(), "reports", "checkpoints", `${crawlId}.ckpt`);
+    if (options.resume && !existsSync(checkpointPath)) {
+      console.error(red(`No checkpoint for ${options.resume} at ${checkpointPath}`));
+      process.exit(1);
+    }
+    opts.checkpointPath = checkpointPath;
+    console.log(gray(`Crawl ID ${crawlId} · Ctrl-C stops and keeps a checkpoint; resume with --resume ${crawlId}\n`));
+
+    const crawler = new Crawler(crawlId);
+    let firstInt = 0;
+    process.on("SIGINT", () => {
+      if (!firstInt) {
+        firstInt = Date.now();
+        console.log(yellow("\nStopping… finishing in-flight pages and saving a checkpoint (Ctrl-C again to quit now)."));
+        crawler.stop();
+      } else if (Date.now() - firstInt > 1000) {
+        // A second, deliberate Ctrl-C (wrappers like npx re-send the first one at once).
+        if (crawler.checkpointNow()) console.log(yellow(`Checkpoint saved; resume with --resume ${crawlId}`));
+        process.exit(130);
+      }
+    });
+    // npx / kill / closed terminal: no time to finish in-flight pages, so save and exit now.
+    for (const sig of ["SIGTERM", "SIGHUP"] as const) {
+      process.once(sig, () => {
+        if (crawler.checkpointNow()) console.log(yellow(`\n${sig}: checkpoint saved; resume with --resume ${crawlId}`));
+        process.exit(sig === "SIGTERM" ? 143 : 129);
+      });
+    }
+    const result = await crawler.crawl(targetUrl, opts);
     console.log(formatCrawlTerminalOutput(result));
 
     if (result.recommendations.length > 0) {
@@ -632,6 +686,16 @@ function splitCsvLine(line: string): string[] {
  * collector is supplied, so every "repeatable" flag uses this to build an
  * array — including for the first, and for zero, occurrences.
  */
+/** Parse a non-negative integer flag or exit: NaN must never reach a limit or a CI gate. */
+function intOption(value: string, flag: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    console.error(red(`${flag} must be a non-negative integer, got '${value}'.`));
+    process.exit(1);
+  }
+  return n;
+}
+
 function collect(value: string, previous: string[] = []): string[] {
   return [...previous, value];
 }
@@ -972,7 +1036,8 @@ program
       }
     }
     for (const [host, list] of byHost.entries()) {
-      const res = await submitToIndexNow({ host, key, urlList: list });
+      // Same key file location as the `indexnow` command, or engines reject the key.
+      const res = await submitToIndexNow({ host, key, keyLocation: config.indexnow?.keyLocation, urlList: list });
       if (res.success) console.log(green(`✔ [${host}] ${res.message}`));
       else console.log(yellow(`⚠ [${host}] ${res.message}`));
     }
@@ -1018,6 +1083,7 @@ program
   .description("Analyze server access logs (CLF/Combined) and cross-reference with crawl data")
   .option("--crawl <id>", "Crawl ID to cross-reference known/indexable URLs")
   .option("--out <path>", "Write analysis summary JSON to path")
+  .option("--verify-bots", "Verify Googlebot/Bingbot hits by reverse + forward DNS (Google's documented method); flags spoofed user agents")
   .action(async (logFile, options) => {
     const content = await fs.readFile(logFile, "utf-8");
     let knownPages: Array<{ url: string; status: number; isIndexable: boolean }> | undefined;
@@ -1040,8 +1106,19 @@ program
     if (report.neverCrawledIndexable && report.neverCrawledIndexable.length > 0) {
       console.log(yellow(`\n⚠ ${report.neverCrawledIndexable.length} indexable page(s) never visited by bots in log window`));
     }
+    let verification: Awaited<ReturnType<typeof verifyCrawlerHits>> | undefined;
+    if (options.verifyBots) {
+      const entries = content.split(/\r?\n/).map(parseLogLine).filter((e): e is LogEntry => e !== null);
+      verification = await verifyCrawlerHits(entries);
+      console.log(`\n• Search bot verification (reverse + forward DNS):`);
+      if (verification.length === 0) console.log(gray("  - No Googlebot or Bingbot hits in this log"));
+      for (const v of verification) {
+        const line = `  - ${bold(v.bot)}: ${v.verified} verified, ${v.spoofed} unverified hits`;
+        console.log(v.spoofed ? yellow(`${line} (e.g. ${v.unverifiedIps.slice(0, 3).join(", ")})`) : line);
+      }
+    }
     if (options.out) {
-      await fs.writeFile(options.out, JSON.stringify(report, null, 2), "utf-8");
+      await fs.writeFile(options.out, JSON.stringify(verification ? { ...report, botVerification: verification } : report, null, 2), "utf-8");
       console.log(green(`\n✔ Log audit report → ${options.out}`));
     }
   });
@@ -1195,9 +1272,9 @@ program
       process.exit(1);
     }
     const gate = evaluateCiGate(crawl, {
-      maxErrors: parseInt(options.maxErrors, 10),
-      maxWarnings: parseInt(options.maxWarnings, 10),
-      minAeoScore: parseInt(options.minAeo, 10),
+      maxErrors: intOption(options.maxErrors, "--max-errors"),
+      maxWarnings: intOption(options.maxWarnings, "--max-warnings"),
+      minAeoScore: intOption(options.minAeo, "--min-aeo"),
     });
     console.log(gate.markdownReport);
     if (options.out) {
@@ -1273,7 +1350,9 @@ program
   .action(async (fileOrUrl, testPath, options) => {
     let content = "";
     if (fileOrUrl.startsWith("http://") || fileOrUrl.startsWith("https://")) {
-      const fetched = await fetchPage(fileOrUrl);
+      const u = new URL(fileOrUrl);
+      const robotsUrl = u.pathname.endsWith("robots.txt") ? u.href : `${u.origin}/robots.txt`;
+      const fetched = await fetchPage(robotsUrl);
       content = fetched.html;
     } else {
       content = await fs.readFile(fileOrUrl, "utf-8");
@@ -1345,18 +1424,18 @@ program
   .description("Zero-shot time series forecasting and anomaly detection via Google Research TimesFM")
   .option("-m, --metric <name>", "Crawl metric: aeo, errors, warnings, notices, urls", "aeo")
   .option("-H, --horizon <number>", "Forecast horizon in steps/intervals", "7")
-  .option("-f, --freq <frequency>", "Frequency: daily, weekly, monthly, crawl", "daily")
+  .option("-f, --freq <frequency>", "Frequency: daily, weekly, monthly, crawl (default: daily for --series, crawl for crawl history)")
   .option("-s, --series <numbers>", "Comma-separated manual time series (e.g. 10,12,15,14,18)")
   .option("--json", "Output raw JSON result instead of formatted markdown")
   .action(async (url, options) => {
     const horizon = parseInt(options.horizon, 10) || 7;
-    const freq = options.freq || "daily";
+    const freq = options.freq;
 
     if (options.series) {
-      const numbers = options.series.split(",").map((s: string) => parseFloat(s.trim())).filter((n: number) => !isNaN(n));
+      const numbers = options.series.split(",").map((s: string) => parseFloat(s.trim())).filter((n: number) => Number.isFinite(n));
       const res = timesfmForecast(numbers, {
         horizon,
-        freq,
+        freq: freq || "daily",
         metricName: options.metric || "Custom Series",
       });
       if (options.json) {

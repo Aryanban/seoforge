@@ -1,22 +1,17 @@
-import React, { useEffect, useState } from "react";
-import { api, PagedResult, IssueRow, severityBg } from "../lib/api.js";
-import { Card, Badge, Spinner, EmptyState } from "../components/ui.js";
+import React from "react";
+import { useApi, PagedResult, IssueRow, severityBg, safeHref } from "../lib/api.js";
+import { Card, Badge, Spinner, EmptyState, ErrorState } from "../components/ui.js";
 import { PageHeader } from "../components/ui.js";
 
 export default function Sitemaps({ crawlId }: { crawlId: string }) {
-  const [crawl, setCrawl] = useState<any>(null);
-  const [urls, setUrls] = useState<any[]>([]);
-  const [orphanIssue, setOrphanIssue] = useState<IssueRow | null>(null);
+  const { data: crawl, error } = useApi<any>(`/api/crawl/${crawlId}`);
+  const urls = useApi<any[]>(`/api/crawl/${crawlId}/sitemap`).data ?? [];
+  const orphanIssue =
+    useApi<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?search=sitemap&pageSize=10`).data?.rows.find(
+      (i) => i.id === "orphan_in_sitemap"
+    ) ?? null;
 
-  useEffect(() => {
-    api<any>(`/api/crawl/${crawlId}`).then(setCrawl).catch(() => setCrawl(null));
-    api<any[]>(`/api/crawl/${crawlId}/sitemap`).then(setUrls).catch(() => setUrls([]));
-    api<PagedResult<IssueRow>>(`/api/crawl/${crawlId}/issues?search=sitemap&pageSize=10`)
-      .then((r) => setOrphanIssue(r.rows.find((i) => i.id === "orphan_in_sitemap") || null))
-      .catch(() => setOrphanIssue(null));
-  }, [crawlId]);
-
-  if (!crawl) return <Spinner label="Loading sitemap data…" />;
+  if (!crawl) return error ? <ErrorState message={error} /> : <Spinner label="Loading sitemap data…" />;
 
   const stats = [
     {
@@ -44,7 +39,7 @@ export default function Sitemaps({ crawlId }: { crawlId: string }) {
         {stats.map((s) => (
           <Card key={s.label} className="p-4">
             <div
-              className={`text-2xl font-bold tabular-nums ${s.ok ? "text-white" : "text-amber-400"}`}
+              className={`text-2xl font-bold tabular-nums ${s.ok ? "text-text" : "text-amber-400"}`}
             >
               {s.value}
             </div>
@@ -64,7 +59,7 @@ export default function Sitemaps({ crawlId }: { crawlId: string }) {
             {orphanIssue.affectedUrls.slice(0, 20).map((u) => (
               <a
                 key={u}
-                href={u}
+                href={safeHref(u)}
                 target="_blank"
                 rel="noreferrer"
                 className="block text-sky-400 hover:text-sky-300 text-xs truncate transition-colors"
@@ -96,7 +91,7 @@ export default function Sitemaps({ crawlId }: { crawlId: string }) {
                   <tr key={i} className="border-b border-border hover:bg-panel2/50 transition-colors">
                     <td className="p-2.5">
                       <a
-                        href={u.url}
+                        href={safeHref(u.url)}
                         target="_blank"
                         rel="noreferrer"
                         className="text-sky-400 hover:text-sky-300 text-xs transition-colors"

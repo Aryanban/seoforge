@@ -41,7 +41,7 @@ export function auditPageSecurity(input: PageSecurityInput): SecurityFinding[] {
   if (isHttps && html) {
     const $ = cheerio.load(html);
     const active: string[] = [];
-    $("script[src^=\"http://\"], link[href^=\"http://\"]").each((_, el) => { active.push($(el).attr("src") || $(el).attr("href") || ""); });
+    $("script[src^=\"http://\"], link[rel~=\"stylesheet\"][href^=\"http://\"], link[rel~=\"preload\"][href^=\"http://\"], link[rel~=\"modulepreload\"][href^=\"http://\"]").each((_, el) => { active.push($(el).attr("src") || $(el).attr("href") || ""); });
     const passive: string[] = [];
     $("img[src^=\"http://\"], video[src^=\"http://\"], audio[src^=\"http://\"], iframe[src^=\"http://\"]").each((_, el) => { passive.push($(el).attr("src") || ""); });
     if (active.length > 0) out.push({ id: "mixed_content_active", name: "Active mixed content (blocked)", severity: "Error", message: `${active.length} script/stylesheet(s) load over HTTP on an HTTPS page — browsers BLOCK these.`, details: { count: active.length, sample: active.slice(0, 5) } });

@@ -85,8 +85,9 @@ export function compareCrawls(baseCrawl: CrawlResult, targetCrawl: CrawlResult):
 
     // Status change
     if (basePage.status !== targetPage.status) {
+      // Going unreachable (status 0: timeout, DNS, connection refused) is a regression too.
       const isRegression =
-        basePage.status < 400 && targetPage.status >= 400;
+        basePage.status > 0 && basePage.status < 400 && (targetPage.status >= 400 || targetPage.status === 0);
       statusChanges.push({
         url: targetPage.url,
         fromStatus: basePage.status,

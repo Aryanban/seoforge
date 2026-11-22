@@ -69,7 +69,7 @@ export function scoreContent(input: ContentScoreInput): ContentScoreReport {
   // Tokenize words
   const words = rawBody
     .toLowerCase()
-    .replace(/[^\w\s-]/g, " ")
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
     .split(/\s+/)
     .filter((w) => w.length > 0);
 

@@ -17,6 +17,7 @@ reports/*.html
 reports/*.md
 reports/*.csv
 reports/.snapshots/
+reports/checkpoints/
 !reports/.gitkeep
 
 # Local config / secrets

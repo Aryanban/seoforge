@@ -15,7 +15,8 @@ export interface HreflangIssue {
   id: string; name: string; severity: "Error" | "Warning" | "Notice";
   message: string; url: string; details?: Record<string, unknown>;
 }
-const VALID_LANG = /^[a-z]{2,3}(-[A-Za-z]{2,8})?$|^x-default$/;
+// language[-script][-region], e.g. en, es-419, zh-Hant-TW (BCP 47 as Google accepts it).
+const VALID_LANG = /^[a-z]{2,3}(-[a-z0-9]{2,8})*$|^x-default$/i;
 function norm(u: string): string {
   try {
     const p = new URL(u); p.hash = "";

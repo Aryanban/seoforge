@@ -35,12 +35,13 @@ export interface ExtractedField {
  */
 export function extractCustomFields(
   html: string,
-  rules: CustomExtractorRule[]
+  rules: CustomExtractorRule[],
+  parsed?: cheerio.CheerioAPI
 ): Record<string, string[]> {
   const results: Record<string, string[]> = {};
   if (!html || rules.length === 0) return results;
 
-  let $: cheerio.CheerioAPI | null = null;
+  let $: cheerio.CheerioAPI | null = parsed ?? null;
 
   for (const rule of rules) {
     const values: string[] = [];
@@ -55,6 +56,8 @@ export function extractCustomFields(
             // Prefer capture group 1 if present, else full match
             const val = match[1] !== undefined ? match[1] : match[0];
             if (val) values.push(val.trim());
+            // A zero-length match (e.g. /\d*/) would otherwise loop forever.
+            if (match[0] === "") re.lastIndex++;
           }
         } else {
           const match = re.exec(html);

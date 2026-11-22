@@ -23,6 +23,60 @@
   --color-accent2: #6366f1;
 }
 
+/*
+ * Light theme. Components use semantic tokens plus a few raw palette shades
+ * (zinc-*, emerald-300, ...). Rather than touching every class, light mode
+ * inverts the zinc scale and darkens the light accent shades used for text,
+ * so every existing utility stays readable on a light surface.
+ */
+:root {
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #f6f6f8;
+  --color-panel: #ffffff;
+  --color-panel2: #f4f4f6;
+  --color-panel3: #ebebef;
+  --color-border: #e4e4e8;
+  --color-border2: #d0d0d6;
+  --color-text: #18181b;
+  --color-muted: #52525b;
+  --color-faint: #71717a;
+  --color-err: #dc2626;
+  --color-warn: #c2780a;
+  --color-note: #0284c7;
+  --color-ok: #059669;
+  --color-accent: #4f46e5;
+  --color-accent2: #4338ca;
+
+  --color-zinc-50: #09090b;
+  --color-zinc-100: #18181b;
+  --color-zinc-200: #27272a;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-400: #52525b;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-950: #fafafa;
+
+  --color-emerald-300: #047857;
+  --color-emerald-400: #059669;
+  --color-amber-300: #b45309;
+  --color-amber-400: #c2780a;
+  --color-indigo-200: #3730a3;
+  --color-indigo-300: #4338ca;
+  --color-indigo-400: #4f46e5;
+  --color-sky-300: #0369a1;
+  --color-sky-400: #0284c7;
+  --color-red-300: #b91c1c;
+  --color-red-400: #dc2626;
+}
+:root[data-theme="light"] body::before {
+  background: radial-gradient(ellipse at center top, rgba(99, 102, 241, 0.06), transparent 70%);
+}
+
 * {
   box-sizing: border-box;
 }
